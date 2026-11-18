@@ -791,7 +791,25 @@ readHash();syncInputs();if(!window.BESS||typeof BESS.build!=='function'||!Array.
 catalog=BESS.catalog.map(c=>({...c,fence_W_ft:+c.fence_W_ft,fence_D_ft:+c.fence_D_ft,sf:+c.sf,units:+c.units}));refreshSelection(Boolean(state.code));document.body.dataset.ready='1';
 /* ==== v3 merge: routing v3 (shared_gap_routing.js) ==== */
 // Shared-gap routing. Coordinates are feet in the unrotated catalog yard.
-const ROUTE_OVERRIDES = {};
+const ROUTE_OVERRIDES = {
+  // Reeves 11/18/26: drawn in the planner (10-AF, middle spine). BESS-10 shortened by Claude:
+  // tee off the top of the shared 8|9 gap and run along the back of BESS-9 into the BESS-10 panel (no north-fence run, no backtrack).
+  '10-AF:MS': [
+    {unit:1,label:'BESS-1',path:[[62.33333333333334,0.5],[1,0.5],[1,4.25],[5.0666666666666655,4.25]]},
+    {unit:2,label:'BESS-2',path:[[62.33333333333334,0.5],[13.966666666666665,0.5],[13.966666666666665,12.525],[10.399999999999999,12.525]]},
+    {unit:3,label:'BESS-3',path:[[62.33333333333334,0.5],[13.966666666666665,0.5],[13.966666666666665,4.25],[17.53333333333333,4.25]]},
+    {unit:4,label:'BESS-4',path:[[62.33333333333334,0.5],[26.43333333333333,0.5],[26.43333333333333,12.525],[22.866666666666664,12.525]]},
+    {unit:5,label:'BESS-5',path:[[62.33333333333334,0.5],[26.43333333333333,0.5],[26.43333333333333,4.25],[29.999999999999996,4.25]]},
+    {unit:6,label:'BESS-6',path:[[62.33333333333334,0.5],[38.9,0.5],[38.9,12.525],[35.33333333333333,12.525]]},
+    {unit:7,label:'BESS-7',path:[[62.33333333333334,0.5],[38.9,0.5],[38.9,4.25],[42.46666666666667,4.25]]},
+    {unit:8,label:'BESS-8',path:[[62.33333333333334,0.5],[51.36666666666667,0.5],[51.36666666666667,12.525],[47.8,12.525]]},
+    {unit:9,label:'BESS-9',path:[[62.33333333333334,0.5],[51.36666666666667,0.5],[51.36666666666667,4.25],[54.93333333333334,4.25]]},
+    {unit:10,label:'BESS-10',path:[[62.33333333333334,0.5],[51.36666666666667,0.5],[51.36666666666667,12.525],[60.266666666666666,12.525]]}
+  ]
+};
+// Reeves 11/18/26: gate moves. Applied on top of the catalog default gate (Rev 3 allows the gate on any side).
+const GATE_OVERRIDES = { '10-AF': {side:'N', from:26.67, len:12} };
+(function(){ if(!window.BESS||BESS.__gatePatched)return; const b=BESS.build; BESS.build=function(code){ const l=b.apply(this,arguments); if(GATE_OVERRIDES[code])l.gate=Object.assign({},GATE_OVERRIDES[code]); return l; }; BESS.__gatePatched=true; })();
 function v3Stub(u) {
   return {S:[u.x+u.w-2/3,u.y-.25],N:[u.x+2/3,u.y+u.h+.25],
     W:[u.x-.25,u.y+2/3],E:[u.x+u.w+.25,u.y+u.h-2/3]}[u.control];
@@ -1208,7 +1226,8 @@ function v3ApplyOverrides(l,m,method){
     }
   }
   for(const u of l.units)if(!seen.has(u.id))out.extra.push('BESS-'+u.id+': missing override');
-  if(method==='MS')out.extra.push('MS override: 24 in spine has not been specified');
+  // Claude 11/18: a drawn MS route without a spine is a note, not a conflict (10-AF has only a 1 ft clear strip, so the trunk is conduit, not a 24 in spine).
+  if(method==='MS')out.warnings.push('Drawn route: conduit trunk only, no 24 in spine on this layout');
   return out;
 }
 function v3Gate(l,m,gate){
