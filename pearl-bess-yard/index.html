@@ -1,91 +1,1040 @@
 <!doctype html>
-<html lang="en"><head><meta name="robots" content="noindex,nofollow"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
 <title>Pearl BESS Yard Routing Options</title>
 <style>
-html,body{margin:0;height:100%;font:14px/1.35 system-ui,Segoe UI,Arial,sans-serif;background:#eef0f2;color:#1b1f23}
-#c{position:fixed;inset:0;width:100%;height:100%}
-#panel{position:fixed;left:12px;top:12px;width:340px;max-height:calc(100% - 24px);overflow:auto;background:rgba(255,255,255,.94);border:1px solid #ccd;border-radius:8px;padding:12px}
-h1{font-size:15px;margin:0 0 6px} .btn{display:inline-block;margin:2px 3px 2px 0;padding:6px 10px;border:1px solid #889;border-radius:6px;background:#fff;cursor:pointer;font-size:13px}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;font:14px/1.4 system-ui,Segoe UI,Arial,sans-serif;background:#eef0f2;color:#1b1f23}
+#c{position:fixed;inset:0;width:100%;height:100%;touch-action:none}
+#panel{position:fixed;left:12px;top:12px;width:375px;max-height:calc(100% - 24px);overflow:auto;overscroll-behavior:contain;background:rgba(255,255,255,.96);border:1px solid #cbd0da;border-radius:9px;padding:12px;box-shadow:0 3px 15px #0002}
+h1{font-size:16px;margin:0 0 8px}
+button{font:inherit;cursor:pointer;touch-action:manipulation}
+.btn{margin:2px 3px 2px 0;padding:7px 9px;border:1px solid #8993a1;border-radius:6px;background:#fff;font-size:12px;text-align:left}
 .btn.on{background:#1b3a5c;color:#fff;border-color:#1b3a5c}
-.sw{display:inline-block;width:22px;height:8px;border-radius:4px;vertical-align:middle;margin-right:5px}
-#desc{font-size:12.5px;margin-top:8px} #desc b{display:inline-block;min-width:92px}
-.small{font-size:11.5px;color:#555;margin-top:8px}
-@media (max-width:700px){#panel{width:auto;right:12px;max-height:38%}}
-</style></head><body>
-<canvas id="c"></canvas>
-<div id="panel">
-<h1>Days Inn Pearl BESS yard, 10 units (Rev C CCD layout)</h1>
-<div id="opts"></div>
-<div style="margin-top:6px"><span class="btn" id="vIso">Iso</span><span class="btn" id="vPlan">Plan</span><span class="btn" id="vClose">Close-up</span><span class="btn" id="vEnd">Aisle eye view</span></div>
-<div style="margin-top:4px"><label><input type="checkbox" id="tL" checked> labels</label> &nbsp;<label><input type="checkbox" id="tF" checked> fence</label> &nbsp;<label><input type="checkbox" id="tH" checked> aisle hatch</label></div>
-<div style="margin-top:6px"><span class="sw" style="background:#f08a00"></span>power &nbsp;<span class="sw" style="background:#1f6fe0"></span>data (Cat6) &nbsp;<span class="sw" style="background:#2e9d4f"></span>aisle / 42 in work zone</div>
-<div id="desc"></div>
-<div class="small">Feet. Pad 4 in above grade, cabinet 44.8 x 93.3 x 76.05 in, 1 ft between units of a pair, 4 ft between pairs and to wall/fence. Planning mockup, not for construction; the EOR sets the final design. Drag to orbit, wheel to zoom, right-drag to pan.</div>
+#opts .btn{display:block;width:100%}
+.toggles{display:flex;flex-wrap:wrap;gap:6px 12px;margin:8px 0}
+.toggles label{font-size:12px;cursor:pointer}
+.legend{font-size:12px;margin:8px 0}
+.sw{display:inline-block;width:18px;height:9px;border-radius:3px;margin-right:4px}
+.small{font-size:11.5px;color:#515966;margin-top:9px}
+table{border-collapse:collapse;width:100%;font-size:12px;margin-top:8px}
+th,td{border-top:1px solid #dde1e7;padding:5px 3px;vertical-align:top}
+th{text-align:left;width:92px;color:#4a5360;font-weight:600}
+#checks{font-size:12px;padding:8px;border-radius:5px;background:#edf6ef;margin:6px 0}
+#checks.bad{background:#fff0ed;color:#9d2222}
+#checks ul{padding-left:18px;margin:4px 0}
+#checks p{margin:0}
+#desc{font-size:12.5px}
+#collapse{display:none}
+button:focus-visible{outline:3px solid #3198db;outline-offset:2px}
+@media(max-width:700px){
+  #c{height:60%;bottom:40%}
+  #panel{left:0;right:0;top:auto;bottom:0;width:100%;height:40%;max-height:40%;border-radius:12px 12px 0 0;padding:10px 12px;padding-bottom:max(10px,env(safe-area-inset-bottom))}
+  #collapse{display:block;float:right;padding:2px 7px;margin-left:6px}
+  #panel.collapsed{height:52px;overflow:hidden}
+  body.panel-collapsed #c{height:calc(100% - 52px);bottom:52px}
+  h1{font-size:14px;margin-top:3px}
+  #opts .btn{min-height:38px}
+}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="Interactive 3D battery yard. Drag to orbit; pinch to zoom."></canvas>
+<aside id="panel">
+<button class="btn" id="collapse" aria-expanded="true" aria-controls="content">Hide</button>
+<h1>Days Inn Pearl BESS yard, 10 units</h1>
+<div id="content">
+  <div id="opts" aria-label="Routing options"></div>
+  <div id="views">
+    <button class="btn" data-view="iso">Iso</button>
+    <button class="btn" data-view="iso2">Iso NE</button>
+    <button class="btn" data-view="plan">Plan</button>
+    <button class="btn" data-view="close">Close-up</button>
+    <button class="btn" data-view="eye">Eye view</button>
+  </div>
+  <div class="toggles">
+    <label><input type="checkbox" id="tZ" checked> clear zones</label>
+    <label><input type="checkbox" id="tB" checked> 6 in band</label>
+    <label><input type="checkbox" id="tL" checked> labels</label>
+    <label><input type="checkbox" id="tF" checked> fence</label>
+    <label><input type="checkbox" id="tG"> see-through cabinets</label>
+  </div>
+  <button class="btn" id="check">Check zones</button>
+  <div id="checks" role="status" aria-live="polite"></div>
+  <div class="legend">
+    <span class="sw" style="background:#f08a00"></span>power &nbsp;
+    <span class="sw" style="background:#1f6fe0"></span>Cat6 conduit<br>
+    <span class="sw" style="background:#e0202070"></span>42 in clear zone &nbsp;
+    <span class="sw" style="background:#2fbf4f99"></span>6 in face band<br>
+    <span class="sw" style="background:#ffd24a"></span>front plate &nbsp;
+    <span class="sw" style="background:#ed1515"></span>conflicting run<br>
+    <span class="sw" style="background:#99633370"></span>underground trench (U)
+  </div>
+  <div id="desc"></div>
+  <p class="small">Feet; grade = 0. Pad +4 in. Cabinet 44.8 × 93.3 × 76.05 in. Red zones extend 42 in from each control end and access long side, grade to 6′-6″; the green band marks the first 6 in at the control face. Units numbered south to north, west then east. Fence 6′-0″ on all four sides; east gate opening 12 ft.</p>
+  <p class="small">Planning mockup, not for construction. The engineer of record and Viridi confirm plate entries, the 6 in projection, supports, anchors and final code requirements. Zone checks cover modeled routing only. Drag to orbit, wheel/pinch to zoom, right-drag or two-finger drag to pan.</p>
+  <noscript>Enable JavaScript to view the yard.</noscript>
 </div>
+</aside>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script>
-const D = {"meta": {"W": 16.5, "L": 63.83, "padH": 0.3333333333333333, "UH": 6.3374999999999995}, "base": [{"t": "box", "b": [-0.6, -1, -0.5, 18.0, 65.83, 0], "c": "#d9d6cf", "a": 1, "kind": "ground"}, {"t": "box", "b": [-0.6, -1, 0, 0, 64.83, 6], "c": "#b8b3a9", "a": 0.45, "kind": "wall"}, {"t": "box", "b": [0, -0.1, 0, 16.5, 0, 6], "c": "#e8e4d8", "a": 0.35, "kind": "fence"}, {"t": "box", "b": [0, 63.83, 0, 16.5, 63.93, 6], "c": "#e8e4d8", "a": 0.35, "kind": "fence"}, {"t": "box", "b": [16.5, 0, 0, 16.6, 49.8, 6], "c": "#e8e4d8", "a": 0.35, "kind": "fence"}, {"t": "box", "b": [16.5, 61.8, 0, 16.6, 63.83, 6], "c": "#e8e4d8", "a": 0.35, "kind": "fence"}, {"t": "box", "b": [16.5, 49.8, 0, 16.6, 61.8, 0.02], "c": "#caa56a", "a": 0.6, "kind": "gate"}, {"t": "box", "b": [17.5, 3.0, 0, 18.0, 3.5, 4], "c": "#e5b900", "a": 1, "kind": "boll"}, {"t": "box", "b": [17.5, 8.17, 0, 18.0, 8.67, 4], "c": "#e5b900", "a": 1, "kind": "boll"}, {"t": "box", "b": [17.5, 13.34, 0, 18.0, 13.84, 4], "c": "#e5b900", "a": 1, "kind": "boll"}, {"t": "box", "b": [17.5, 18.51, 0, 18.0, 19.01, 4], "c": "#e5b900", "a": 1, "kind": "boll"}, {"t": "box", "b": [17.5, 23.68, 0, 18.0, 24.18, 4], "c": "#e5b900", "a": 1, "kind": "boll"}, {"t": "box", "b": [17.5, 28.85, 0, 18.0, 29.35, 4], "c": "#e5b900", "a": 1, "kind": "boll"}, {"t": "box", "b": [17.5, 34.02, 0, 18.0, 34.52, 4], "c": "#e5b900", "a": 1, "kind": "boll"}, {"t": "box", "b": [17.5, 39.19, 0, 18.0, 39.69, 4], "c": "#e5b900", "a": 1, "kind": "boll"}, {"t": "box", "b": [17.5, 44.36, 0, 18.0, 44.86, 4], "c": "#e5b900", "a": 1, "kind": "boll"}, {"t": "box", "b": [17.5, 49.53, 0, 18.0, 50.03, 4], "c": "#e5b900", "a": 1, "kind": "boll"}, {"t": "box", "b": [3.0, 3.0, 0, 13.467, 12.775, 0.333], "c": "#bdbdbd", "a": 1, "kind": "pad"}, {"t": "box", "b": [3.0, 14.775, 0, 13.467, 24.55, 0.333], "c": "#bdbdbd", "a": 1, "kind": "pad"}, {"t": "box", "b": [3.0, 26.55, 0, 13.467, 36.325, 0.333], "c": "#bdbdbd", "a": 1, "kind": "pad"}, {"t": "box", "b": [3.0, 38.325, 0, 13.467, 48.1, 0.333], "c": "#bdbdbd", "a": 1, "kind": "pad"}, {"t": "box", "b": [3.0, 50.1, 0, 13.467, 59.875, 0.333], "c": "#bdbdbd", "a": 1, "kind": "pad"}, {"t": "box", "b": [3.75, 3.75, 0.333, 7.983, 12.025, 0.917], "c": "#6e7780", "a": 1, "kind": "lip"}, {"t": "box", "b": [4.0, 4.0, 0.917, 7.733, 11.775, 6.671], "c": "#e9f1e4", "a": 1, "kind": "unit"}, {"t": "box", "b": [4.0, 11.655, 0.917, 7.733, 11.775, 6.671], "c": "#333", "a": 1, "kind": "ctl"}, {"t": "box", "b": [6.817, 11.735, 1.133, 7.317, 11.835, 1.833], "c": "#ffd24a", "a": 1, "kind": "cp"}, {"t": "box", "b": [8.483, 3.75, 0.333, 12.717, 12.025, 0.917], "c": "#6e7780", "a": 1, "kind": "lip"}, {"t": "box", "b": [8.733, 4.0, 0.917, 12.467, 11.775, 6.671], "c": "#e9f1e4", "a": 1, "kind": "unit"}, {"t": "box", "b": [8.733, 4.0, 0.917, 12.467, 4.12, 6.671], "c": "#333", "a": 1, "kind": "ctl"}, {"t": "box", "b": [9.15, 3.94, 1.133, 9.65, 4.04, 1.833], "c": "#ffd24a", "a": 1, "kind": "cp"}, {"t": "box", "b": [3.75, 15.525, 0.333, 7.983, 23.8, 0.917], "c": "#6e7780", "a": 1, "kind": "lip"}, {"t": "box", "b": [4.0, 15.775, 0.917, 7.733, 23.55, 6.671], "c": "#e9f1e4", "a": 1, "kind": "unit"}, {"t": "box", "b": [4.0, 23.43, 0.917, 7.733, 23.55, 6.671], "c": "#333", "a": 1, "kind": "ctl"}, {"t": "box", "b": [6.817, 23.51, 1.133, 7.317, 23.61, 1.833], "c": "#ffd24a", "a": 1, "kind": "cp"}, {"t": "box", "b": [8.483, 15.525, 0.333, 12.717, 23.8, 0.917], "c": "#6e7780", "a": 1, "kind": "lip"}, {"t": "box", "b": [8.733, 15.775, 0.917, 12.467, 23.55, 6.671], "c": "#e9f1e4", "a": 1, "kind": "unit"}, {"t": "box", "b": [8.733, 15.775, 0.917, 12.467, 15.895, 6.671], "c": "#333", "a": 1, "kind": "ctl"}, {"t": "box", "b": [9.15, 15.715, 1.133, 9.65, 15.815, 1.833], "c": "#ffd24a", "a": 1, "kind": "cp"}, {"t": "box", "b": [3.75, 27.3, 0.333, 7.983, 35.575, 0.917], "c": "#6e7780", "a": 1, "kind": "lip"}, {"t": "box", "b": [4.0, 27.55, 0.917, 7.733, 35.325, 6.671], "c": "#e9f1e4", "a": 1, "kind": "unit"}, {"t": "box", "b": [4.0, 35.205, 0.917, 7.733, 35.325, 6.671], "c": "#333", "a": 1, "kind": "ctl"}, {"t": "box", "b": [6.817, 35.285, 1.133, 7.317, 35.385, 1.833], "c": "#ffd24a", "a": 1, "kind": "cp"}, {"t": "box", "b": [8.483, 27.3, 0.333, 12.717, 35.575, 0.917], "c": "#6e7780", "a": 1, "kind": "lip"}, {"t": "box", "b": [8.733, 27.55, 0.917, 12.467, 35.325, 6.671], "c": "#e9f1e4", "a": 1, "kind": "unit"}, {"t": "box", "b": [8.733, 27.55, 0.917, 12.467, 27.67, 6.671], "c": "#333", "a": 1, "kind": "ctl"}, {"t": "box", "b": [9.15, 27.49, 1.133, 9.65, 27.59, 1.833], "c": "#ffd24a", "a": 1, "kind": "cp"}, {"t": "box", "b": [3.75, 39.075, 0.333, 7.983, 47.35, 0.917], "c": "#6e7780", "a": 1, "kind": "lip"}, {"t": "box", "b": [4.0, 39.325, 0.917, 7.733, 47.1, 6.671], "c": "#e9f1e4", "a": 1, "kind": "unit"}, {"t": "box", "b": [4.0, 46.98, 0.917, 7.733, 47.1, 6.671], "c": "#333", "a": 1, "kind": "ctl"}, {"t": "box", "b": [6.817, 47.06, 1.133, 7.317, 47.16, 1.833], "c": "#ffd24a", "a": 1, "kind": "cp"}, {"t": "box", "b": [8.483, 39.075, 0.333, 12.717, 47.35, 0.917], "c": "#6e7780", "a": 1, "kind": "lip"}, {"t": "box", "b": [8.733, 39.325, 0.917, 12.467, 47.1, 6.671], "c": "#e9f1e4", "a": 1, "kind": "unit"}, {"t": "box", "b": [8.733, 39.325, 0.917, 12.467, 39.445, 6.671], "c": "#333", "a": 1, "kind": "ctl"}, {"t": "box", "b": [9.15, 39.265, 1.133, 9.65, 39.365, 1.833], "c": "#ffd24a", "a": 1, "kind": "cp"}, {"t": "box", "b": [3.75, 50.85, 0.333, 7.983, 59.125, 0.917], "c": "#6e7780", "a": 1, "kind": "lip"}, {"t": "box", "b": [4.0, 51.1, 0.917, 7.733, 58.875, 6.671], "c": "#e9f1e4", "a": 1, "kind": "unit"}, {"t": "box", "b": [4.0, 58.755, 0.917, 7.733, 58.875, 6.671], "c": "#333", "a": 1, "kind": "ctl"}, {"t": "box", "b": [6.817, 58.835, 1.133, 7.317, 58.935, 1.833], "c": "#ffd24a", "a": 1, "kind": "cp"}, {"t": "box", "b": [8.483, 50.85, 0.333, 12.717, 59.125, 0.917], "c": "#6e7780", "a": 1, "kind": "lip"}, {"t": "box", "b": [8.733, 51.1, 0.917, 12.467, 58.875, 6.671], "c": "#e9f1e4", "a": 1, "kind": "unit"}, {"t": "box", "b": [8.733, 51.1, 0.917, 12.467, 51.22, 6.671], "c": "#333", "a": 1, "kind": "ctl"}, {"t": "box", "b": [9.15, 51.04, 1.133, 9.65, 51.14, 1.833], "c": "#ffd24a", "a": 1, "kind": "cp"}, {"t": "box", "b": [5.5, 62.55, 0, 11.5, 63.55, 6.0], "c": "#444a50", "a": 1, "kind": "rack"}], "aisles": [[0, 0, 3.0, 63.83], [13.466666666666665, 0, 16.5, 63.83], [3.0, 0, 13.466666666666665, 3.0], [3.0, 12.774999999999999, 13.466666666666665, 14.774999999999999], [3.0, 24.549999999999997, 13.466666666666665, 26.549999999999997], [3.0, 36.324999999999996, 13.466666666666665, 38.324999999999996], [3.0, 48.099999999999994, 13.466666666666665, 50.099999999999994], [3.0, 59.87499999999999, 13.466666666666665, 62.55]], "options": {"A": {"title": "A  Strut H-frame rack + tray along the back", "shapes": [{"t": "box", "b": [0.7, 1.7, 0, 1.1, 2.3, 7.7], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [15.4, 1.7, 0, 15.8, 2.3, 7.7], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [0.7, 1.5, 7.2, 15.8, 2.5, 7.5], "c": "#aeb6bd", "a": 1, "kind": "tray"}, {"t": "box", "b": [0.7, 13.475, 0, 1.1, 14.075, 7.7], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [15.4, 13.475, 0, 15.8, 14.075, 7.7], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [0.7, 13.275, 7.2, 15.8, 14.275, 7.5], "c": "#aeb6bd", "a": 1, "kind": "tray"}, {"t": "box", "b": [0.7, 25.25, 0, 1.1, 25.85, 7.7], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [15.4, 25.25, 0, 15.8, 25.85, 7.7], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [0.7, 25.05, 7.2, 15.8, 26.05, 7.5], "c": "#aeb6bd", "a": 1, "kind": "tray"}, {"t": "box", "b": [0.7, 37.025, 0, 1.1, 37.625, 7.7], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [15.4, 37.025, 0, 15.8, 37.625, 7.7], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [0.7, 36.825, 7.2, 15.8, 37.825, 7.5], "c": "#aeb6bd", "a": 1, "kind": "tray"}, {"t": "box", "b": [0.7, 48.8, 0, 1.1, 49.4, 7.7], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [15.4, 48.8, 0, 15.8, 49.4, 7.7], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [0.7, 48.6, 7.2, 15.8, 49.6, 7.5], "c": "#aeb6bd", "a": 1, "kind": "tray"}, {"t": "box", "b": [0.7, 60.575, 0, 1.1, 61.175, 7.7], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [15.4, 60.575, 0, 15.8, 61.175, 7.7], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [0.7, 60.375, 7.2, 15.8, 61.375, 7.5], "c": "#aeb6bd", "a": 1, "kind": "tray"}, {"t": "box", "b": [0.4, 2.0, 7.2, 1.4, 60.875, 7.5], "c": "#aeb6bd", "a": 1, "kind": "tray"}, {"t": "tube", "p": [[0.7, 2.0, 7.4], [0.7, 60.875, 7.4]], "r": 0.17, "c": "#f08a00", "n": "power bank up to 10 x 1-1/2in"}, {"t": "tube", "p": [[1.15, 2.0, 7.4], [1.15, 60.875, 7.4]], "r": 0.08, "c": "#1f6fe0", "n": "Cat6 conduits"}, {"t": "tube", "p": [[0.7, 60.875, 7.4], [8.5, 60.875, 7.4], [8.5, 63.05, 7.4], [8.5, 63.05, 6.0]], "r": 0.17, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.15, 61.125, 7.4], [9.3, 61.125, 7.4], [9.3, 63.05, 7.4], [9.3, 63.05, 6.0]], "r": 0.08, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 13.775, 7.4], [7.067, 13.775, 7.4], [7.067, 12.325, 7.4], [7.067, 12.325, 1.533], [7.067, 11.775, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.15, 13.975, 7.4], [7.187, 13.975, 7.4], [7.187, 12.325, 7.4], [7.187, 12.325, 1.333], [7.187, 11.775, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 1.7, 7.4], [9.4, 1.7, 7.4], [9.4, 3.45, 7.4], [9.4, 3.45, 1.533], [9.4, 4.0, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.15, 1.9, 7.4], [9.52, 1.9, 7.4], [9.52, 3.45, 7.4], [9.52, 3.45, 1.333], [9.52, 4.0, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 25.55, 7.4], [7.067, 25.55, 7.4], [7.067, 24.1, 7.4], [7.067, 24.1, 1.533], [7.067, 23.55, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.15, 25.75, 7.4], [7.187, 25.75, 7.4], [7.187, 24.1, 7.4], [7.187, 24.1, 1.333], [7.187, 23.55, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 13.475, 7.4], [9.4, 13.475, 7.4], [9.4, 15.225, 7.4], [9.4, 15.225, 1.533], [9.4, 15.775, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.15, 13.675, 7.4], [9.52, 13.675, 7.4], [9.52, 15.225, 7.4], [9.52, 15.225, 1.333], [9.52, 15.775, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 37.325, 7.4], [7.067, 37.325, 7.4], [7.067, 35.875, 7.4], [7.067, 35.875, 1.533], [7.067, 35.325, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.15, 37.525, 7.4], [7.187, 37.525, 7.4], [7.187, 35.875, 7.4], [7.187, 35.875, 1.333], [7.187, 35.325, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 25.25, 7.4], [9.4, 25.25, 7.4], [9.4, 27.0, 7.4], [9.4, 27.0, 1.533], [9.4, 27.55, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.15, 25.45, 7.4], [9.52, 25.45, 7.4], [9.52, 27.0, 7.4], [9.52, 27.0, 1.333], [9.52, 27.55, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 49.1, 7.4], [7.067, 49.1, 7.4], [7.067, 47.65, 7.4], [7.067, 47.65, 1.533], [7.067, 47.1, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.15, 49.3, 7.4], [7.187, 49.3, 7.4], [7.187, 47.65, 7.4], [7.187, 47.65, 1.333], [7.187, 47.1, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 37.025, 7.4], [9.4, 37.025, 7.4], [9.4, 38.775, 7.4], [9.4, 38.775, 1.533], [9.4, 39.325, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.15, 37.225, 7.4], [9.52, 37.225, 7.4], [9.52, 38.775, 7.4], [9.52, 38.775, 1.333], [9.52, 39.325, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 60.875, 7.4], [7.067, 60.875, 7.4], [7.067, 59.425, 7.4], [7.067, 59.425, 1.533], [7.067, 58.875, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.15, 61.075, 7.4], [7.187, 61.075, 7.4], [7.187, 59.425, 7.4], [7.187, 59.425, 1.333], [7.187, 58.875, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 48.8, 7.4], [9.4, 48.8, 7.4], [9.4, 50.55, 7.4], [9.4, 50.55, 1.533], [9.4, 51.1, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.15, 49.0, 7.4], [9.52, 49.0, 7.4], [9.52, 50.55, 7.4], [9.52, 50.55, 1.333], [9.52, 51.1, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}], "labels": [{"t": "label", "p": [0.9, 4, 8.3], "s": "tray 7'-6\" AFF", "c": "#f08a00"}, {"t": "label", "p": [15.6, 22, 8.4], "s": "H-frame posts\nevery strip", "c": "#444"}, {"t": "label", "p": [8.2, 28.8, 7.9], "s": "overhead crossbar tray\nover the 4 ft strip", "c": "#444"}, {"t": "label", "p": [10.599999999999998, 2.4, 2.6], "s": "front blanking plate:\npower + Cat6 share one plate\n(Viridi, 11/16)", "c": "#b58900"}], "h": "tray 7'-6\" AFF"}, "B": {"title": "B  Fence / wall-mounted strut + tray with overhead drops", "shapes": [{"t": "box", "b": [0, 2.0, 6.8, 1.0, 60.875, 7.1], "c": "#aeb6bd", "a": 1, "kind": "tray"}, {"t": "tube", "p": [[0.7, 2.0, 7.0], [0.7, 60.875, 7.0]], "r": 0.17, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[0.3, 2.0, 7.0], [0.3, 60.875, 7.0]], "r": 0.08, "c": "#1f6fe0", "n": null}, {"t": "box", "b": [0, 1.9, 6.6, 3.0, 2.1, 6.8], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [0, 13.675, 6.6, 3.0, 13.875, 6.8], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [0, 25.45, 6.6, 3.0, 25.65, 6.8], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [0, 37.225, 6.6, 3.0, 37.425, 6.8], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [0, 49.0, 6.6, 3.0, 49.2, 6.8], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "box", "b": [0, 60.775, 6.6, 3.0, 60.975, 6.8], "c": "#8c96a0", "a": 1, "kind": "strut"}, {"t": "tube", "p": [[0.7, 60.875, 7.0], [8.5, 60.875, 7.0], [8.5, 63.05, 7.0], [8.5, 63.05, 6.0]], "r": 0.17, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[0.3, 61.125, 7.0], [9.3, 61.125, 7.0], [9.3, 63.05, 7.0], [9.3, 63.05, 6.0]], "r": 0.08, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 13.775, 7.0], [7.067, 13.775, 7.0], [7.067, 12.325, 7.0], [7.067, 12.325, 1.533], [7.067, 11.775, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[0.3, 13.975, 7.0], [7.187, 13.975, 7.0], [7.187, 12.325, 7.0], [7.187, 12.325, 1.333], [7.187, 11.775, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 1.7, 7.0], [9.4, 1.7, 7.0], [9.4, 3.45, 7.0], [9.4, 3.45, 1.533], [9.4, 4.0, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[0.3, 1.9, 7.0], [9.52, 1.9, 7.0], [9.52, 3.45, 7.0], [9.52, 3.45, 1.333], [9.52, 4.0, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 25.55, 7.0], [7.067, 25.55, 7.0], [7.067, 24.1, 7.0], [7.067, 24.1, 1.533], [7.067, 23.55, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[0.3, 25.75, 7.0], [7.187, 25.75, 7.0], [7.187, 24.1, 7.0], [7.187, 24.1, 1.333], [7.187, 23.55, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 13.475, 7.0], [9.4, 13.475, 7.0], [9.4, 15.225, 7.0], [9.4, 15.225, 1.533], [9.4, 15.775, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[0.3, 13.675, 7.0], [9.52, 13.675, 7.0], [9.52, 15.225, 7.0], [9.52, 15.225, 1.333], [9.52, 15.775, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 37.325, 7.0], [7.067, 37.325, 7.0], [7.067, 35.875, 7.0], [7.067, 35.875, 1.533], [7.067, 35.325, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[0.3, 37.525, 7.0], [7.187, 37.525, 7.0], [7.187, 35.875, 7.0], [7.187, 35.875, 1.333], [7.187, 35.325, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 25.25, 7.0], [9.4, 25.25, 7.0], [9.4, 27.0, 7.0], [9.4, 27.0, 1.533], [9.4, 27.55, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[0.3, 25.45, 7.0], [9.52, 25.45, 7.0], [9.52, 27.0, 7.0], [9.52, 27.0, 1.333], [9.52, 27.55, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 49.1, 7.0], [7.067, 49.1, 7.0], [7.067, 47.65, 7.0], [7.067, 47.65, 1.533], [7.067, 47.1, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[0.3, 49.3, 7.0], [7.187, 49.3, 7.0], [7.187, 47.65, 7.0], [7.187, 47.65, 1.333], [7.187, 47.1, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 37.025, 7.0], [9.4, 37.025, 7.0], [9.4, 38.775, 7.0], [9.4, 38.775, 1.533], [9.4, 39.325, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[0.3, 37.225, 7.0], [9.52, 37.225, 7.0], [9.52, 38.775, 7.0], [9.52, 38.775, 1.333], [9.52, 39.325, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 60.875, 7.0], [7.067, 60.875, 7.0], [7.067, 59.425, 7.0], [7.067, 59.425, 1.533], [7.067, 58.875, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[0.3, 61.075, 7.0], [7.187, 61.075, 7.0], [7.187, 59.425, 7.0], [7.187, 59.425, 1.333], [7.187, 58.875, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[0.7, 48.8, 7.0], [9.4, 48.8, 7.0], [9.4, 50.55, 7.0], [9.4, 50.55, 1.533], [9.4, 51.1, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[0.3, 49.0, 7.0], [9.52, 49.0, 7.0], [9.52, 50.55, 7.0], [9.52, 50.55, 1.333], [9.52, 51.1, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}], "labels": [{"t": "label", "p": [0.5, 4, 8.1], "s": "wall/fence strut + tray 7'-0\" AFF", "c": "#f08a00"}, {"t": "label", "p": [5.0, 22.5, 7.9], "s": "spur on cantilever\nstrut arm (<=10 ft span)", "c": "#444"}, {"t": "label", "p": [10.599999999999998, 2.4, 2.6], "s": "front blanking plate:\npower + Cat6 share one plate\n(Viridi, 11/16)", "c": "#b58900"}], "h": "tray 7'-0\" AFF"}, "C": {"title": "C  Conduit on the pad apron under the skid lip + pad-to-pad bridge", "shapes": [{"t": "tube", "p": [[3.5, 3.5, 0.433], [3.5, 60.875, 0.433], [3.5, 61.75, 0.433]], "r": 0.15, "c": "#f08a00", "n": "collector bank"}, {"t": "tube", "p": [[3.78, 3.5, 0.403], [3.78, 60.875, 0.403], [3.78, 61.75, 0.403]], "r": 0.07, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[3.5, 61.75, 0.433], [8.5, 61.75, 0.433], [8.5, 63.05, 0.433], [8.5, 63.05, 6.0]], "r": 0.15, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[3.78, 61.75, 0.433], [9.3, 61.75, 0.433], [9.3, 63.05, 0.433], [9.3, 63.05, 6.0]], "r": 0.07, "c": "#1f6fe0", "n": null}, {"t": "box", "b": [2.7, 12.775, 0, 4.3, 14.775, 0.333], "c": "#5f6b75", "a": 1, "kind": "bridge"}, {"t": "box", "b": [2.7, 24.55, 0, 4.3, 26.55, 0.333], "c": "#5f6b75", "a": 1, "kind": "bridge"}, {"t": "box", "b": [2.7, 36.325, 0, 4.3, 38.325, 0.333], "c": "#5f6b75", "a": 1, "kind": "bridge"}, {"t": "box", "b": [2.7, 48.1, 0, 4.3, 50.1, 0.333], "c": "#5f6b75", "a": 1, "kind": "bridge"}, {"t": "tube", "p": [[3.5, 12.275, 0.433], [7.067, 12.275, 0.433], [7.067, 12.275, 0.933], [7.067, 11.775, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[3.78, 12.395, 0.403], [7.187, 12.395, 0.403], [7.187, 12.395, 0.933], [7.187, 11.775, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[3.5, 3.5, 0.433], [9.4, 3.5, 0.433], [9.4, 3.5, 0.933], [9.4, 4.0, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[3.78, 3.62, 0.403], [9.52, 3.62, 0.403], [9.52, 3.62, 0.933], [9.52, 4.0, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[3.5, 24.05, 0.433], [7.067, 24.05, 0.433], [7.067, 24.05, 0.933], [7.067, 23.55, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[3.78, 24.17, 0.403], [7.187, 24.17, 0.403], [7.187, 24.17, 0.933], [7.187, 23.55, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[3.5, 15.275, 0.433], [9.4, 15.275, 0.433], [9.4, 15.275, 0.933], [9.4, 15.775, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[3.78, 15.395, 0.403], [9.52, 15.395, 0.403], [9.52, 15.395, 0.933], [9.52, 15.775, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[3.5, 35.825, 0.433], [7.067, 35.825, 0.433], [7.067, 35.825, 0.933], [7.067, 35.325, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[3.78, 35.945, 0.403], [7.187, 35.945, 0.403], [7.187, 35.945, 0.933], [7.187, 35.325, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[3.5, 27.05, 0.433], [9.4, 27.05, 0.433], [9.4, 27.05, 0.933], [9.4, 27.55, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[3.78, 27.17, 0.403], [9.52, 27.17, 0.403], [9.52, 27.17, 0.933], [9.52, 27.55, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[3.5, 47.6, 0.433], [7.067, 47.6, 0.433], [7.067, 47.6, 0.933], [7.067, 47.1, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[3.78, 47.72, 0.403], [7.187, 47.72, 0.403], [7.187, 47.72, 0.933], [7.187, 47.1, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[3.5, 38.825, 0.433], [9.4, 38.825, 0.433], [9.4, 38.825, 0.933], [9.4, 39.325, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[3.78, 38.945, 0.403], [9.52, 38.945, 0.403], [9.52, 38.945, 0.933], [9.52, 39.325, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[3.5, 59.375, 0.433], [7.067, 59.375, 0.433], [7.067, 59.375, 0.933], [7.067, 58.875, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[3.78, 59.495, 0.403], [7.187, 59.495, 0.403], [7.187, 59.495, 0.933], [7.187, 58.875, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[3.5, 50.6, 0.433], [9.4, 50.6, 0.433], [9.4, 50.6, 0.933], [9.4, 51.1, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[3.78, 50.72, 0.403], [9.52, 50.72, 0.403], [9.52, 50.72, 0.933], [9.52, 51.1, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}], "labels": [{"t": "label", "p": [3.5, 6, 2.2], "s": "conduit on pad apron,\nunder skid lip", "c": "#f08a00"}, {"t": "label", "p": [1.0, 27.5, 1.8], "s": "flush walk-over bridge\n(deck = pad top, +4in)", "c": "#444"}, {"t": "label", "p": [10.599999999999998, 2.4, 2.6], "s": "front blanking plate:\npower + Cat6 share one plate\n(Viridi, 11/16)", "c": "#b58900"}], "h": "conduit +4 in (pad top)"}, "D": {"title": "D  Shallow covered trench + cable ramps across the aisle", "shapes": [{"t": "box", "b": [1.0, 1.5, 0, 2.0, 61.375, 0.03], "c": "#46525c", "a": 1, "kind": "trench"}, {"t": "box", "b": [1.0, 1.5, 0, 13.467, 2.5, 0.03], "c": "#46525c", "a": 1, "kind": "trench"}, {"t": "box", "b": [1.0, 13.275, 0, 13.467, 14.275, 0.03], "c": "#46525c", "a": 1, "kind": "trench"}, {"t": "box", "b": [1.0, 25.05, 0, 13.467, 26.05, 0.03], "c": "#46525c", "a": 1, "kind": "trench"}, {"t": "box", "b": [1.0, 36.825, 0, 13.467, 37.825, 0.03], "c": "#46525c", "a": 1, "kind": "trench"}, {"t": "box", "b": [1.0, 48.6, 0, 13.467, 49.6, 0.03], "c": "#46525c", "a": 1, "kind": "trench"}, {"t": "box", "b": [1.0, 60.375, 0, 13.467, 61.375, 0.03], "c": "#46525c", "a": 1, "kind": "trench"}, {"t": "tube", "p": [[1.35, 2.0, 0.06], [1.35, 60.875, 0.06]], "r": 0.17, "c": "#f08a00", "n": "power bank in trench"}, {"t": "tube", "p": [[1.75, 2.0, 0.06], [1.75, 60.875, 0.06]], "r": 0.08, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[1.35, 60.875, 0.06], [8.5, 60.875, 0.06], [8.5, 62.15, 0.06], [8.5, 62.15, 0.6], [8.5, 63.05, 0.6], [8.5, 63.05, 3.0]], "r": 0.17, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.75, 61.125, 0.06], [9.3, 61.125, 0.06], [9.3, 62.15, 0.06], [9.3, 63.05, 3.0]], "r": 0.08, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[1.35, 13.775, 0.06], [7.067, 13.775, 0.06], [7.067, 12.775, 0.06], [7.067, 12.175, 0.453], [7.067, 11.775, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.75, 13.975, 0.06], [7.187, 13.975, 0.06], [7.187, 12.775, 0.06], [7.187, 12.175, 0.453], [7.187, 11.775, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[1.35, 1.7, 0.06], [9.4, 1.7, 0.06], [9.4, 3.0, 0.06], [9.4, 3.6, 0.453], [9.4, 4.0, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.75, 1.9, 0.06], [9.52, 1.9, 0.06], [9.52, 3.0, 0.06], [9.52, 3.6, 0.453], [9.52, 4.0, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[1.35, 25.55, 0.06], [7.067, 25.55, 0.06], [7.067, 24.55, 0.06], [7.067, 23.95, 0.453], [7.067, 23.55, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.75, 25.75, 0.06], [7.187, 25.75, 0.06], [7.187, 24.55, 0.06], [7.187, 23.95, 0.453], [7.187, 23.55, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[1.35, 13.475, 0.06], [9.4, 13.475, 0.06], [9.4, 14.775, 0.06], [9.4, 15.375, 0.453], [9.4, 15.775, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.75, 13.675, 0.06], [9.52, 13.675, 0.06], [9.52, 14.775, 0.06], [9.52, 15.375, 0.453], [9.52, 15.775, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[1.35, 37.325, 0.06], [7.067, 37.325, 0.06], [7.067, 36.325, 0.06], [7.067, 35.725, 0.453], [7.067, 35.325, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.75, 37.525, 0.06], [7.187, 37.525, 0.06], [7.187, 36.325, 0.06], [7.187, 35.725, 0.453], [7.187, 35.325, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[1.35, 25.25, 0.06], [9.4, 25.25, 0.06], [9.4, 26.55, 0.06], [9.4, 27.15, 0.453], [9.4, 27.55, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.75, 25.45, 0.06], [9.52, 25.45, 0.06], [9.52, 26.55, 0.06], [9.52, 27.15, 0.453], [9.52, 27.55, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[1.35, 49.1, 0.06], [7.067, 49.1, 0.06], [7.067, 48.1, 0.06], [7.067, 47.5, 0.453], [7.067, 47.1, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.75, 49.3, 0.06], [7.187, 49.3, 0.06], [7.187, 48.1, 0.06], [7.187, 47.5, 0.453], [7.187, 47.1, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[1.35, 37.025, 0.06], [9.4, 37.025, 0.06], [9.4, 38.325, 0.06], [9.4, 38.925, 0.453], [9.4, 39.325, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.75, 37.225, 0.06], [9.52, 37.225, 0.06], [9.52, 38.325, 0.06], [9.52, 38.925, 0.453], [9.52, 39.325, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[1.35, 60.875, 0.06], [7.067, 60.875, 0.06], [7.067, 59.875, 0.06], [7.067, 59.275, 0.453], [7.067, 58.875, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.75, 61.075, 0.06], [7.187, 61.075, 0.06], [7.187, 59.875, 0.06], [7.187, 59.275, 0.453], [7.187, 58.875, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}, {"t": "tube", "p": [[1.35, 48.8, 0.06], [9.4, 48.8, 0.06], [9.4, 50.1, 0.06], [9.4, 50.7, 0.453], [9.4, 51.1, 1.333]], "r": 0.065, "c": "#f08a00", "n": null}, {"t": "tube", "p": [[1.75, 49.0, 0.06], [9.52, 49.0, 0.06], [9.52, 50.1, 0.06], [9.52, 50.7, 0.453], [9.52, 51.1, 1.233]], "r": 0.04, "c": "#1f6fe0", "n": null}], "labels": [{"t": "label", "p": [1.5, 3, 1.3], "s": "flush trench, steel cover\n(grade, no step)", "c": "#444"}, {"t": "label", "p": [10.2, 15.8, 1.6], "s": "cable ramp at pad edge\n(bevel, <=1:2 on 1/4-1/2in)", "c": "#444"}, {"t": "label", "p": [10.599999999999998, 2.4, 2.6], "s": "front blanking plate:\npower + Cat6 share one plate\n(Viridi, 11/16)", "c": "#b58900"}], "h": "flush at grade"}}};
-const INFO = {
- A:{how:"Overhead. Tray at 7'-6\" AFF on H-frames in each 4 ft strip; drops land at the front blanking plate on the control-end face.",trip:"None on the floor; only a short riser at each control end.",code:"Cable tray / RMC / EMT. Single conductors in tray need 1/0 or larger (NEC 392.10), otherwise keep them in conduit. Keep posts out of the 42 in zones."},
- B:{how:"Overhead. Strut + tray on the wall or steel fence posts at 7'-0\"; spurs on cantilever arms cross the strip, then drop to the front blanking plate.",trip:"None on the floor.",code:"A vinyl fence is not structural: use the existing wall or steel posts. Conduit support spacing per NEC 344/358; spans over about 10 ft need a mid support."},
- C:{how:"On the pad. Conduit lies on the 1 ft pad apron under the skid lip; a flush deck bridges each 2 ft grade gap between pads.",trip:"Low: the 4 in pad step already exists and the bridge deck is flush with the pad top.",code:"Sch 80 PVC (352.10 / 352.12 damage) or RMC; expansion fittings. Apron holds about 10 conduits in 2 rows; check lip height and door swing."},
- D:{how:"Shallow flush trench with steel cover plates down the west aisle and across each strip; cable ramps at the pad edge.",trip:"Flush plates; bevel at pad edge. Raised ramps across an access aisle are the weakest choice (trip, working space); keep ramps to the pad edge only.",code:"Still an underground-type method: NEC 300.5 cover rules apply and it needs drainage. Weakest fit for the above-ground goal."}
+'use strict';
+
+// Source coordinates are in feet: [east, north, elevation].
+const r3=n=>Math.round(n*1000)/1000;
+const POWER='#f08a00',DATA='#1f6fe0';
+
+const Y0=[4,15.775,27.55,39.325,51.1];
+const Y1=[11.775,23.55,35.325,47.1,58.875];
+const PAD0=[3,14.775,26.55,38.325,50.1];
+const PAD1=[12.775,24.55,36.325,48.1,59.875];
+
+// Exact support bounds from center.html option M:
+// [strut south, strut north, end-cap south, end-cap north].
+const SUPPORT_BOUNDS=[
+  [5.13,5.27,5.15,5.25],
+  [7.817,7.957,7.837,7.937],
+  [10.505,10.645,10.525,10.625],
+  [16.905,17.045,16.925,17.025],
+  [19.592,19.732,19.612,19.712],
+  [22.28,22.42,22.3,22.4],
+  [28.68,28.82,28.7,28.8],
+  [31.367,31.507,31.387,31.487],
+  [34.055,34.195,34.075,34.175],
+  [40.455,40.595,40.475,40.575],
+  [43.142,43.282,43.163,43.262],
+  [45.83,45.97,45.85,45.95],
+  [52.23,52.37,52.25,52.35],
+  [54.917,55.057,54.938,55.037],
+  [57.605,57.745,57.625,57.725]
+];
+
+const names={
+  M:'M  Middle spine rack',
+  B:'B  Fence-mounted strut + tray with overhead drops',
+  C:'C  Pad apron conduit + flush pad-to-pad bridge',
+  U:'U  Underground'
 };
-const cv=document.getElementById('c');
-const R=new THREE.WebGLRenderer({canvas:cv,antialias:true});R.setPixelRatio(devicePixelRatio);
-const S=new THREE.Scene();S.background=new THREE.Color(0xeef0f2);
-const cam=new THREE.PerspectiveCamera(40,1,0.1,600);
-const ctl=new THREE.OrbitControls(cam,cv);ctl.enableDamping=true;
-S.add(new THREE.HemisphereLight(0xffffff,0x888877,0.9));
-const dl=new THREE.DirectionalLight(0xffffff,0.7);dl.position.set(-30,60,40);S.add(dl);
-const P=(x,y,z)=>new THREE.Vector3(x,z,-y);
-const baseG=new THREE.Group(),optG=new THREE.Group(),labG=new THREE.Group(),fenceG=new THREE.Group(),hatchG=new THREE.Group();
-S.add(baseG,optG,labG,fenceG,hatchG);
-function mkBox(s,parent){const b=s.b,w=b[3]-b[0],d=b[4]-b[1],h=b[5]-b[2];
- const m=new THREE.Mesh(new THREE.BoxGeometry(w,Math.max(h,0.01),d),new THREE.MeshLambertMaterial({color:s.c,transparent:s.a<1,opacity:s.a}));
- m.position.copy(P((b[0]+b[3])/2,(b[1]+b[4])/2,(b[2]+b[5])/2));parent.add(m);
- if(s.kind!=='ground'){const e=new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry),new THREE.LineBasicMaterial({color:0x444444}));e.position.copy(m.position);parent.add(e);}
- return m;}
-function mkTube(s,parent){const pts=s.p.map(q=>P(q[0],q[1],q[2]));const mat=new THREE.MeshLambertMaterial({color:s.c});
- for(let i=0;i<pts.length-1;i++){const a=pts[i],b=pts[i+1],L=a.distanceTo(b);if(L<1e-4)continue;
-  const m=new THREE.Mesh(new THREE.CylinderGeometry(s.r,s.r,L,12),mat);m.position.copy(a).add(b).multiplyScalar(0.5);
-  m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),b.clone().sub(a).normalize());parent.add(m);}
- pts.forEach(q=>{const m=new THREE.Mesh(new THREE.SphereGeometry(s.r,12,8),mat);m.position.copy(q);parent.add(m);});}
-function sprite(text,color,x,y,z){const c=document.createElement('canvas'),g=c.getContext('2d');g.font='bold 30px sans-serif';
- const ls=text.split('\n'),w=Math.ceil(Math.max(...ls.map(l=>g.measureText(l).width))+24),h=ls.length*38+14;c.width=w;c.height=h;
- g.font='bold 30px sans-serif';g.fillStyle='rgba(255,255,255,.93)';g.fillRect(0,0,w,h);g.strokeStyle=color||'#333';g.lineWidth=4;g.strokeRect(2,2,w-4,h-4);
- g.fillStyle='#111';ls.forEach((l,i)=>g.fillText(l,12,38*(i+1)));
- const t=new THREE.CanvasTexture(c);const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:t,depthTest:false}));
- sp.position.copy(P(x,y,z));sp.scale.set(w/42,h/42,1);return sp;}
-D.base.forEach(s=>{ if(s.t!=='box')return;
-  if(s.kind==='fence'||s.kind==='gate'){mkBox(s,fenceG);return;} mkBox(s,baseG);});
-(function(){const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d');g.fillStyle='rgba(46,157,79,.10)';g.fillRect(0,0,64,64);
- g.strokeStyle='#2e9d4f';g.lineWidth=4;g.beginPath();for(let i=-64;i<128;i+=16){g.moveTo(i,64);g.lineTo(i+64,0);}g.stroke();
- D.aisles.forEach(r=>{const w=r[2]-r[0],d=r[3]-r[1];if(!(w>0&&d>0))return;const tx=new THREE.CanvasTexture(c);tx.wrapS=tx.wrapT=THREE.RepeatWrapping;tx.repeat.set(w/2,d/2);
-  const m=new THREE.Mesh(new THREE.PlaneGeometry(w,d),new THREE.MeshBasicMaterial({map:tx,transparent:true,depthWrite:false}));
-  m.rotation.x=-Math.PI/2;m.position.copy(P((r[0]+r[2])/2,(r[1]+r[3])/2,0.04));hatchG.add(m);});})();
-const fixed=[["pad +4 in",8.2,0.2,0.9,"#aa8"],["cabinet 6'-4\" (76.05 in)",12.6,5,6.9,"#aa8"],["fence 6'-0\"",16.5,30,6.4,"#aa8"],["BCP + EMS rack",8.5,63,6.6,"#444"],["12 ft gate",16.5,56,3,"#aa8"],["(10) bollards",18,12,4.6,"#aa8"],["aisle 4 ft / 42 in zone",1.5,40,0.4,"#2e9d4f"],["(E) west wall",0,20,6.5,"#888"]];
-fixed.forEach(f=>labG.add(sprite(f[0],f[4],f[1],f[2],f[3])));
-const optsEl=document.getElementById('opts'),descEl=document.getElementById('desc');
-const names={A:'A  H-frame rack',B:'B  Fence/wall strut',C:'C  Pad apron + bridge',D:'D  Trench + ramps',N:'None'};
-function show(k){while(optG.children.length)optG.remove(optG.children[0]);
- while(labG.children.length>fixed.length)labG.remove(labG.children[labG.children.length-1]);
- if(k!=='N'){const o=D.options[k];o.shapes.forEach(s=>s.t==='box'?mkBox(s,optG):mkTube(s,optG));o.labels.forEach(l=>labG.add(sprite(l.s,l.c,l.p[0],l.p[1],l.p[2])));
-  const i=INFO[k];descEl.innerHTML='<b>'+o.title+'</b><br><b>How it crosses:</b>'+i.how+'<br><b>Trip risk:</b>'+i.trip+'<br><b>Code notes:</b>'+i.code+'<br><b>Height:</b>'+o.h;}
- else descEl.innerHTML='Yard with no routing.';
- [...optsEl.children].forEach(b=>b.classList.toggle('on',b.dataset.k===k));}
-Object.keys(names).forEach(k=>{const b=document.createElement('span');b.className='btn';b.textContent=names[k];b.dataset.k=k;b.onclick=()=>show(k);optsEl.appendChild(b);});
-function view(p,t){cam.position.copy(p);ctl.target.copy(t);ctl.update();}
-const C0=P(8.2,32,2);
-document.getElementById('vIso').onclick=()=>view(P(48,-28,38),C0);
-document.getElementById('vPlan').onclick=()=>view(P(8.2,31.9,110),P(8.2,32,0));
-document.getElementById('vClose').onclick=()=>view(P(30,10,14),P(7,22,3));
-document.getElementById('vEnd').onclick=()=>view(P(8.2,-6,5.5),P(8.2,30,4));
-document.getElementById('tL').onchange=e=>{labG.visible=e.target.checked};
-document.getElementById('tF').onchange=e=>{fenceG.visible=e.target.checked};
-document.getElementById('tH').onchange=e=>{hatchG.visible=e.target.checked};
-function rs(){const w=innerWidth,h=innerHeight;R.setSize(w,h,false);cam.aspect=w/h;cam.updateProjectionMatrix();}
-addEventListener('resize',rs);rs();show('A');view(P(48,-28,38),C0);
-(function loop(){requestAnimationFrame(loop);ctl.update();R.render(S,cam);})();
-</script></body></html>
+
+function box(o,b,kind,c='#8c96a0',a=1,name='',unit=null){
+  const s={t:'box',b:b.map(r3),kind,c,a,name,unit};
+  o.shapes.push(s);
+  return s;
+}
+
+function tube(o,p,r,c,name,unit=null){
+  const s={t:'tube',p:p.map(q=>q.map(r3)),r,c,name,unit};
+  o.shapes.push(s);
+  return s;
+}
+
+function label(o,s,p,c='#444'){
+  o.labels.push({s,p,c});
+}
+
+function common(k){
+  const middle=k==='M',W=middle?18.5:16.5;
+  const o={W,L:63.83,shapes:[],labels:[],units:[],zones:[],bands:[]};
+
+  box(o,[-.6,-1,-.5,W+1.5,65.83,0],
+      'ground','#d9d6cf',k==='U'?.22:1);
+
+  // Four fence sides, preserving the east gate opening.
+  [
+    [0,-.1,0,W,0,6],
+    [0,63.83,0,W,63.93,6],
+    [-.1,0,0,0,63.83,6],
+    [W,0,0,W+.1,49.8,6],
+    [W,61.8,0,W+.1,63.83,6]
+  ].forEach(b=>box(o,b,'fence','#e8e4d8',.24));
+
+  box(o,[W,49.8,0,W+.1,61.8,.02],'gate','#caa56a',.6);
+
+  // West steel posts align with the retained B cantilever arms.
+  const west=[
+    0,2,7.8875,13.775,19.6625,25.55,31.4375,
+    37.325,43.2125,49.1,54.9875,60.875,63.83
+  ];
+  west.forEach(y=>
+    box(o,[-.12,y-.09,0,.12,y+.09,6],'post','#66727b')
+  );
+
+  [0,8,16,24,32,40,49.8,61.8,63.83].forEach(y=>
+    box(o,[W-.08,y-.08,0,W+.08,y+.08,6],'post','#66727b')
+  );
+
+  [W/3,2*W/3].forEach(x=>
+    [0,63.83].forEach(y=>
+      box(o,[x-.08,y-.08,0,x+.08,y+.08,6],'post','#66727b')
+    )
+  );
+
+  for(let j=0;j<10;j++){
+    const y=r3(3+j*5.17);
+    box(o,[W+1,y,0,W+1.5,y+.5,4],'boll','#e5b900');
+  }
+
+  for(let j=0;j<5;j++){
+    box(o,[3,PAD0[j],0,middle?15.467:13.467,PAD1[j],.333],
+        'pad','#bdbdbd');
+
+    for(let side=0;side<2;side++){
+      const x=side?(middle?10.733:8.733):4;
+      const xe=side?(middle?14.467:12.467):7.733;
+      const y=Y0[j],ye=Y1[j];
+      const face=side?y:ye,dir=side?-1:1;
+      const id=2*j+side+1;
+
+      box(o,[x-.25,y-.25,.333,xe+.25,ye+.25,.917],
+          'lip','#6e7780');
+
+      box(o,[x,y,.917,xe,ye,6.671],'unit','#e9f1e4');
+
+      box(o,[x,side?y:ye-.12,.917,xe,side?y+.12:ye,6.671],
+          'ctl','#333');
+
+      const px=middle?(side?11.3:4.567):(side?9.15:6.817);
+
+      if(middle){
+        box(o,[px,face-.03,2.33,px+2.6,face+.03,2.92],
+            'plate','#ffd24a');
+      }else{
+        box(o,[
+          px,face-.04-(side?.02:0),1.133,
+          px+.5,face+.04+(side?0:.02),1.833
+        ],'cp','#ffd24a');
+      }
+
+      const u={
+        id,x,xe,y,ye,face,dir,
+        px:middle?(side?11.633:6.833):(side?9.4:7.067)
+      };
+      o.units.push(u);
+
+      // Same footprints and 0.02 ft face setback as center.html.
+      const front=side?
+        [x,face-3.5,0,xe,face-.02,6.5]:
+        [x,face+.02,0,xe,face+3.5,6.5];
+
+      const band=side?
+        [x,face-.5,0,xe,face-.02,6.5]:
+        [x,face+.02,0,xe,face+.5,6.5];
+
+      const access=side?
+        [xe,y,0,xe+3.5,ye,6.5]:
+        [x-3.5,y,0,x,ye,6.5];
+
+      o.zones.push(
+        box(o,front,'zone','#e02020',.2,'control-end',id)
+      );
+      o.bands.push(
+        box(o,band,'band','#2fbf4f',.4,'face band',id)
+      );
+      o.zones.push(
+        box(o,access,'zone','#e02020',.2,'access',id)
+      );
+
+      label(o,'Unit '+id,[(x+xe)/2,(y+ye)/2,7.25]);
+    }
+  }
+
+  const rack=middle?
+    [6.25,62.55,0,12.25,63.55,6]:
+    [5.5,62.55,0,11.5,63.55,6];
+
+  box(o,rack,middle?'bcp':'rack','#444a50',1,'BCP / EMS rack');
+
+  label(o,'BCP + EMS rack',[W/2,63,6.8]);
+  label(o,'12 ft gate',[W,56,3.2],'#8a6d2a');
+  label(o,'west steel-post fence · 6 ft',[0,20,6.5],'#66727b');
+
+  return o;
+}
+
+function makeMiddle(){
+  const o=common('M');
+
+  // Exact 24 in H-frame geometry from center.html option M.
+  SUPPORT_BOUNDS.forEach(([lo,hi,clo,chi])=>{
+    [
+      [8.263,lo,0,8.403,hi,2.82],
+      [10.063,lo,0,10.203,hi,2.82],
+      [8.233,lo,2.74,10.233,hi,2.82],
+      [8.233,lo,2.37,10.233,hi,2.45]
+    ].forEach((b,i)=>
+      box(o,b,'strut',i<2?'#8c96a0':'#aeb6bd',
+          1,'Middle spine H-frame')
+    );
+
+    [
+      [8.183,clo,2.74,8.283,chi,2.82],
+      [10.183,clo,2.74,10.283,chi,2.82]
+    ].forEach(b=>box(o,b,'cap','#d33'));
+  });
+
+  o.units.forEach(u=>{
+    const j=Math.floor((u.id-1)/2),east=u.id%2===0;
+    const xp=east?9.353+j*.17:9.113-j*.17;
+    const xd=east?9.353+j*.13:9.113-j*.13;
+    const y=u.face+u.dir*.4;
+    const px=east?11.633:6.833;
+    const dx=east?12.133:6.333;
+
+    tube(o,[
+      [xp,62.45,2.9],
+      [xp,y,2.9],
+      [px,y,2.9],
+      [px,u.face,2.9]
+    ],.079,POWER,'Power branch to unit '+u.id,u.id);
+
+    tube(o,[
+      [xd,62.45,2.5],
+      [xd,y,2.5],
+      [dx,y,2.5],
+      [dx,u.face,2.5]
+    ],.044,DATA,'Cat6 branch to unit '+u.id,u.id);
+  });
+
+  label(o,
+    'center rack: H-frames on slab,\npower RMC tier 36 in, Cat6 tier below',
+    [9.233333333333333,30,3.9],'#a05a00');
+
+  label(o,
+    'branch 4 in off face, inside 6 in band',
+    [12.633333333333333,2.2,3.9],'#116622');
+
+  return o;
+}
+
+function makeOverhead(){
+  const o=common('B');
+
+  box(o,[0,2,6.8,1,60.875,7.1],
+      'tray','#aeb6bd',1,'West fence tray');
+
+  tube(o,[[.7,2,7],[.7,60.875,7]],
+       .17,POWER,'Power collector');
+
+  tube(o,[[.3,2,7],[.3,60.875,7]],
+       .08,DATA,'Cat6 collector');
+
+  [2,13.775,25.55,37.325,49.1,60.875].forEach(y=>{
+    box(o,[0,y-.1,6.6,3,y+.1,6.8],
+        'strut','#8c96a0',1,'Fence cantilever strut');
+
+    // Post extension and clamp; fence fabric remains 6 ft high.
+    box(o,[-.1,y-.08,5.8,.1,y+.08,7.15],
+        'strut','#66727b',1,'Steel fence-post extension');
+
+    box(o,[-.14,y-.14,6.6,.18,y+.14,6.8],
+        'strut','#56616a',1,'Fence-post mounting clamp');
+  });
+
+  tube(o,[
+    [.7,60.875,7],
+    [8.5,60.875,7],
+    [8.5,63.05,7],
+    [8.5,63.05,6]
+  ],.17,POWER,'Power rack feeder');
+
+  tube(o,[
+    [.3,61.125,7],
+    [9.3,61.125,7],
+    [9.3,63.05,7],
+    [9.3,63.05,6]
+  ],.08,DATA,'Cat6 rack feeder');
+
+  o.units.forEach(u=>{
+    const east=u.id%2===0;
+    const sy=u.face+(east?-2.3:2);
+    const dy=u.face+u.dir*.333,px=u.px; // drop 4 in off the face, inside the 6 in band
+
+    tube(o,[
+      [.7,sy,7],
+      [px,sy,7],
+      [px,dy,7],
+      [px,dy,1.533],
+      [px,u.face,1.333]
+    ],.065,POWER,'Power branch to unit '+u.id,u.id);
+
+    tube(o,[
+      [.3,sy+.2,7],
+      [px+.12,sy+.2,7],
+      [px+.12,dy,7],
+      [px+.12,dy,1.333],
+      [px+.12,u.face,1.233]
+    ],.04,DATA,'Cat6 branch to unit '+u.id,u.id);
+  });
+
+  label(o,'steel-post-mounted tray · 7 ft',[.5,4,8.1],POWER);
+  label(o,'cantilever strut arm',[5,22.5,7.9]);
+
+  return o;
+}
+
+function makeApron(){
+  const o=common('C');
+
+  tube(o,[
+    [3.5,3.5,.433],
+    [3.5,60.875,.433],
+    [3.5,61.75,.433]
+  ],.15,POWER,'Power collector on apron');
+
+  tube(o,[
+    [3.78,3.5,.403],
+    [3.78,60.875,.403],
+    [3.78,61.75,.403]
+  ],.07,DATA,'Cat6 collector on apron');
+
+  tube(o,[
+    [3.5,61.75,.433],
+    [8.5,61.75,.433],
+    [8.5,63.05,.433],
+    [8.5,63.05,6]
+  ],.15,POWER,'Power rack feeder');
+
+  tube(o,[
+    [3.78,61.75,.433],
+    [9.3,61.75,.433],
+    [9.3,63.05,.433],
+    [9.3,63.05,6]
+  ],.07,DATA,'Cat6 rack feeder');
+
+  for(let j=0;j<4;j++){
+    box(o,[2.7,PAD1[j],0,4.3,PAD0[j+1],.333],
+        'bridge','#5f6b75',1,'Flush pad-to-pad bridge');
+  }
+
+  o.units.forEach(u=>{
+    const y=u.face+u.dir*.5,yd=y+.12,x=u.px;
+
+    tube(o,[
+      [3.5,y,.433],
+      [x,y,.433],
+      [x,y,.933],
+      [x,u.face,1.333]
+    ],.065,POWER,'Power branch to unit '+u.id,u.id);
+
+    tube(o,[
+      [3.78,yd,.403],
+      [x+.12,yd,.403],
+      [x+.12,yd,.933],
+      [x+.12,u.face,1.233]
+    ],.04,DATA,'Cat6 branch to unit '+u.id,u.id);
+  });
+
+  label(o,'conduit on pad apron,\nunder skid lip',[3.5,6,2.2],POWER);
+  label(o,'flush walk-over bridge\ndeck = pad top, +4 in',[1,27.5,1.8]);
+
+  return o;
+}
+
+function makeUnderground(){
+  const o=common('U');
+
+  box(o,[.95,1.5,-2,2.85,63.55,0],
+      'trench','#996333',.17);
+
+  box(o,[.95,62.5,-2,9.65,63.5,0],
+      'trench','#996333',.17);
+
+  o.units.forEach(u=>{
+    const y=r3(u.face+u.dir*.26);
+
+    box(o,[.95,y-.46,-2,u.px+.55,y+.46,0],
+        'trench','#996333',.13);
+
+    [false,true].forEach(data=>{
+      const x=u.px+(data?.12:0);
+      const bank=data?
+        2.4+(u.id-1)*.025:
+        1.2+(u.id-1)*.105;
+
+      const rackX=data?9.3:8.5;
+      const z=-1.8,r=data?.04:.065,c=data?DATA:POWER;
+      const name=(data?'Cat6':'Power')+' branch to unit '+u.id;
+
+      // Individual Sch 40 PVC runs from rack to buried branch.
+      tube(o,[
+        [rackX,63.05,1],
+        [rackX,63.05,z],
+        [bank,63.05,z],
+        [bank,y,z],
+        [x,y,z],
+        [x,y,-.3]
+      ],r,c,name,u.id);
+
+      // Short RMC riser and sweep within the unit's face band.
+      const entry=data?1.233:1.333,rad=.2;
+      const pts=[[x,y,-.3],[x,y,entry-rad]];
+
+      for(let i=1;i<=10;i++){
+        const a=i*Math.PI/20;
+        pts.push([
+          x,
+          u.face+u.dir*(.06+rad*Math.cos(a)),
+          entry-rad+rad*Math.sin(a)
+        ]);
+      }
+
+      pts.push([x,u.face,entry]);
+      tube(o,pts,r,c,name,u.id);
+    });
+  });
+
+  label(o,
+    'Sch 40 PVC · below grade\ntrench bottom −2 ft',
+    [1.8,27,-1.1],'#75471f');
+
+  label(o,
+    'RMC stub-up + sweep\ninside own 6 in face band',
+    [7.1,12.2,2.7],'#116622');
+
+  return o;
+}
+
+const OPTIONS={
+  M:makeMiddle(),
+  B:makeOverhead(),
+  C:makeApron(),
+  U:makeUnderground()
+};
+
+const INFO={
+  M:{
+    how:'Original middle spine layout: backs face the 3 ft center strip and access sides face outward. One 24 in rack on H-frames carries power RMC above Cat6. Branches turn through the cross aisle 4 in off their own control face into the front plate.',
+    trip:'Rack occupies the center strip; no conduit crosses an access aisle.',
+    code:'RMC supports and slab anchors require design. Confirm outward access sides and the permitted 6 in face projection.',
+    height:'Power centerline 2.9 ft (nominal 36 in tier); Cat6 2.5 ft.',
+    yard:'18′-6″ × 63′-10″; 3 ft center gap.'
+  },
+  B:{
+    how:'Original overhead geometry retained. Strut and tray attach to the west fence steel posts through extensions and clamps. It is high at 7′-0″ and has to be, to stay above the 6′-6″ clear zones. Drops enter the front blanking plates; the check identifies any low drop portions outside the 6 in band.',
+    trip:'No conduit on the floor; drops remain at the control ends.',
+    code:'Engineer steel posts, extensions, cantilevers and anchors for the load. Conduit support spacing per NEC 344/358; long spans need intermediate support.',
+    height:'Conduit centerline 7′-0″; tray 6.8–7.1 ft; arms start at 6.6 ft.',
+    yard:'16′-6″ × 63′-10″; original 1 ft pair gap.'
+  },
+  C:{
+    how:'Original pad apron geometry retained: conduit follows the 1 ft apron under the skid lip. A deck flush with the pad top bridges each 2 ft grade gap between pads. Branches enter the front plates.',
+    trip:'Low at the bridges; the existing 4 in pad step remains. The zone check flags this option: the apron conduit and the bridges sit on the floor inside the access and control-end working zones. Workable only if the engineer of record and the inspector accept low conduit on the floor of the working space (NEC 110.26); otherwise pick M or U.',
+    code:'Sch 80 PVC or RMC where subject to damage; expansion fittings and supports require design. Confirm lip clearance and door swing.',
+    height:'Pad and bridge deck +4 in; collector centerlines 0.403–0.433 ft.',
+    yard:'16′-6″ × 63′-10″; original 1 ft pair gap.'
+  },
+  U:{
+    how:'Individual Schedule 40 PVC power and Cat6 conduits run from the BCP/EMS rack down the yard in a buried trench. Each branch stubs up directly below its own front plate, inside its 6 in band, with a short RMC riser and sweep. Brown excavation extends from grade to −2′-0″; ground is transparent in U.',
+    trip:'No trip hazard and nothing overhead; risers remain inside their own face bands.',
+    code:'Needs excavation. NEC 300.5 cover: 18 in for PVC under a non-traffic yard; 24 in where vehicles cross. Use RMC or Sch 80 risers where exposed to damage. Best when pads are not poured yet. Shown depth is for the non-traffic yard; deepen vehicle crossings to provide cover above the conduit.',
+    height:'PVC centerline −1.8 ft; trench bottom −2 ft. Short RMC risers to the plates.',
+    yard:'16′-6″ × 63′-10″; original 1 ft pair gap.'
+  }
+};
+
+// Rendering.
+const el=id=>document.getElementById(id),cv=el('c');
+
+if(!window.THREE||!THREE.OrbitControls){
+  el('checks').textContent='Unable to load three.js or OrbitControls. Check the network connection.';
+  throw new Error('Unable to load three.js or OrbitControls.');
+}
+
+const renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color('#eef0f2');
+
+const camera=new THREE.PerspectiveCamera(38,1,.1,800);
+const controls=new THREE.OrbitControls(camera,cv);
+controls.enableDamping=true;
+controls.maxDistance=300;
+controls.minDistance=2;
+controls.maxPolarAngle=Math.PI*.49;
+controls.touches.ONE=THREE.TOUCH.ROTATE;
+controls.touches.TWO=THREE.TOUCH.DOLLY_PAN;
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x888877,.95));
+const light=new THREE.DirectionalLight(0xffffff,.7);
+light.position.set(-30,60,40);
+scene.add(light);
+
+const P=q=>new THREE.Vector3(q[0],q[2],-q[1]);
+
+const groups={
+  base:new THREE.Group(),
+  unit:new THREE.Group(),
+  zone:new THREE.Group(),
+  band:new THREE.Group(),
+  label:new THREE.Group(),
+  fence:new THREE.Group(),
+  run:new THREE.Group()
+};
+
+Object.values(groups).forEach(g=>scene.add(g));
+
+let current='M',candidates=[],activeView='iso';
+
+function meshBox(s,g){
+  const b=s.b,tr=s.a<1;
+  const mat=tr?
+    new THREE.MeshBasicMaterial({
+      color:s.c,
+      transparent:true,
+      opacity:s.a,
+      depthWrite:false,
+      side:THREE.DoubleSide
+    }):
+    new THREE.MeshLambertMaterial({color:s.c});
+
+  const m=new THREE.Mesh(
+    new THREE.BoxGeometry(
+      b[3]-b[0],
+      Math.max(.01,b[5]-b[2]),
+      b[4]-b[1]
+    ),
+    mat
+  );
+
+  m.position.copy(P([
+    (b[0]+b[3])/2,
+    (b[1]+b[4])/2,
+    (b[2]+b[5])/2
+  ]));
+  g.add(m);
+
+  if(tr)m.renderOrder=s.kind==='ground'?1:2;
+
+  if(!['ground','fence'].includes(s.kind)){
+    const e=new THREE.LineSegments(
+      new THREE.EdgesGeometry(m.geometry),
+      new THREE.LineBasicMaterial({
+        color:s.kind==='zone'?'#b02020':
+              s.kind==='band'?'#1f8f3a':'#444444',
+        transparent:tr,
+        opacity:tr?.65:1
+      })
+    );
+    e.position.copy(m.position);
+    g.add(e);
+  }
+
+  if(['rack','bcp','strut','tray','cap','bridge'].includes(s.kind)){
+    candidates.push({
+      b:s.b,
+      unit:s.unit,
+      name:s.name||s.kind,
+      mat,
+      color:s.c
+    });
+  }
+
+  return m;
+}
+
+function meshTube(s){
+  for(let i=0;i<s.p.length-1;i++){
+    const a=P(s.p[i]),b=P(s.p[i+1]),len=a.distanceTo(b);
+    if(len<1e-6)continue;
+
+    const mat=new THREE.MeshLambertMaterial({color:s.c});
+    const m=new THREE.Mesh(
+      new THREE.CylinderGeometry(s.r,s.r,len,12),
+      mat
+    );
+
+    m.position.copy(a).add(b).multiplyScalar(.5);
+    m.quaternion.setFromUnitVectors(
+      new THREE.Vector3(0,1,0),
+      b.clone().sub(a).normalize()
+    );
+    groups.run.add(m);
+
+    [a,b].forEach(p=>{
+      const end=new THREE.Mesh(
+        new THREE.SphereGeometry(s.r,12,8),mat
+      );
+      end.position.copy(p);
+      groups.run.add(end);
+    });
+
+    candidates.push({
+      a:s.p[i],
+      end:s.p[i+1],
+      r:s.r,
+      unit:s.unit,
+      name:s.name,
+      mat,
+      color:s.c
+    });
+  }
+}
+
+function sprite(l){
+  const c=document.createElement('canvas');
+  const g=c.getContext('2d');
+  g.font='bold 30px sans-serif';
+
+  const lines=l.s.split('\n');
+  const w=Math.ceil(
+    Math.max(...lines.map(t=>g.measureText(t).width))+24
+  );
+  const h=lines.length*38+14;
+
+  c.width=w;
+  c.height=h;
+  g.font='bold 30px sans-serif';
+  g.fillStyle='rgba(255,255,255,.92)';
+  g.fillRect(0,0,w,h);
+  g.strokeStyle=l.c;
+  g.lineWidth=3;
+  g.strokeRect(2,2,w-4,h-4);
+  g.fillStyle='#20252c';
+  lines.forEach((t,i)=>g.fillText(t,12,38*(i+1)));
+
+  const sp=new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map:new THREE.CanvasTexture(c),
+      depthTest:false
+    })
+  );
+  sp.position.copy(P(l.p));
+  sp.scale.set(w/78,h/78,1);
+  sp.renderOrder=9;
+  groups.label.add(sp);
+}
+
+function ghost(){
+  groups.unit.children.forEach(m=>{
+    if(!m.isMesh)return;
+    const on=el('tG').checked;
+    m.material.transparent=on;
+    m.material.opacity=on?.2:1;
+    m.material.depthWrite=!on;
+    m.renderOrder=on?1:0;
+  });
+}
+
+function visibility(){
+  groups.zone.visible=el('tZ').checked;
+  groups.band.visible=el('tB').checked;
+  groups.label.visible=el('tL').checked;
+  groups.fence.visible=el('tF').checked;
+  ghost();
+}
+
+function clearScene(){
+  const geometries=new Set(),materials=new Set(),textures=new Set();
+
+  Object.values(groups).forEach(g=>{
+    g.traverse(m=>{
+      if(m.geometry)geometries.add(m.geometry);
+      if(m.material)materials.add(m.material);
+    });
+    g.clear();
+  });
+
+  materials.forEach(m=>{
+    if(m.map)textures.add(m.map);
+    m.dispose();
+  });
+  geometries.forEach(g=>g.dispose());
+  textures.forEach(t=>t.dispose());
+}
+
+// Strict volume intersection: tangency alone is not zone entry.
+const EPS=1e-7;
+
+function overlap(a,b){
+  return [0,1,2].every(i=>
+    a[i]<b[i+3]-EPS&&a[i+3]>b[i]+EPS
+  );
+}
+
+function subtractBox(a,b){
+  if(!overlap(a,b))return [a];
+
+  const lo=[0,1,2].map(i=>Math.max(a[i],b[i]));
+  const hi=[0,1,2].map(i=>Math.min(a[i+3],b[i+3]));
+  const out=[],core=a.slice();
+
+  for(let i=0;i<3;i++){
+    if(core[i]<lo[i]-EPS){
+      const p=core.slice();
+      p[i+3]=lo[i];
+      out.push(p);
+      core[i]=lo[i];
+    }
+
+    if(core[i+3]>hi[i]+EPS){
+      const p=core.slice();
+      p[i]=hi[i];
+      out.push(p);
+      core[i+3]=hi[i];
+    }
+  }
+
+  return out;
+}
+
+// Slab clipping against a 3D box expanded by conduit radius.
+// Each straight segment and each sweep facet is tested independently.
+function segmentHits(a,b,r,box){
+  let enter=0,leave=1;
+
+  for(let i=0;i<3;i++){
+    const low=box[i]-r+EPS;
+    const high=box[i+3]+r-EPS;
+    const d=b[i]-a[i];
+
+    if(Math.abs(d)<1e-10){
+      if(a[i]<=low||a[i]>=high)return false;
+    }else{
+      let t0=(low-a[i])/d,t1=(high-a[i])/d;
+      if(t0>t1)[t0,t1]=[t1,t0];
+      enter=Math.max(enter,t0);
+      leave=Math.min(leave,t1);
+      if(enter>=leave)return false;
+    }
+  }
+
+  return leave>0&&enter<1;
+}
+
+function conflictsFor(c,o){
+  const hits=[];
+
+  o.zones.forEach(z=>{
+    // Exemption applies only to the branch's own control-end band.
+    // Access zones and neighboring units remain protected.
+    const band=c.unit===z.unit&&z.name==='control-end'?
+      o.bands.find(b=>b.unit===c.unit):null;
+
+    const forbidden=band?subtractBox(z.b,band.b):[z.b];
+
+    if(forbidden.some(b=>
+      c.b?overlap(c.b,b):segmentHits(c.a,c.end,c.r,b)
+    )){
+      hits.push(z);
+    }
+  });
+
+  return hits;
+}
+
+function checkZones(){
+  const o=OPTIONS[current],messages=new Set();
+
+  candidates.forEach(c=>{
+    const hits=conflictsFor(c,o);
+    c.mat.color.set(hits.length?'#ed1515':c.color);
+
+    hits.forEach(z=>
+      messages.add(
+        c.name+' crosses unit '+z.unit+' '+z.name+' zone'
+      )
+    );
+  });
+
+  const panel=el('checks');
+  panel.replaceChildren();
+  panel.classList.toggle('bad',messages.size>0);
+
+  if(!messages.size){
+    panel.textContent='No conflicts';
+  }else{
+    const p=document.createElement('p');
+    p.textContent=messages.size+' conflicts';
+    panel.appendChild(p);
+
+    const ul=document.createElement('ul');
+    messages.forEach(t=>{
+      const li=document.createElement('li');
+      li.textContent=t;
+      ul.appendChild(li);
+    });
+    panel.appendChild(ul);
+  }
+
+  return [...messages];
+}
+
+function build(k){
+  if(!Object.prototype.hasOwnProperty.call(OPTIONS,k))k='M';
+
+  current=k;
+  clearScene();
+  candidates=[];
+
+  const o=OPTIONS[k];
+
+  o.shapes.forEach(s=>{
+    if(s.t==='tube'){
+      meshTube(s);
+      return;
+    }
+
+    const g=['fence','gate','post'].includes(s.kind)?
+      groups.fence:
+      s.kind==='zone'?groups.zone:
+      s.kind==='band'?groups.band:
+      ['unit','ctl'].includes(s.kind)?groups.unit:
+      groups.base;
+
+    meshBox(s,g);
+  });
+
+  o.labels.forEach(sprite);
+  visibility();
+
+  const info=INFO[k],title=document.createElement('strong');
+  title.textContent=names[k];
+  el('desc').replaceChildren(title);
+
+  const table=document.createElement('table');
+
+  [
+    ['How it crosses',info.how],
+    ['Trip risk',info.trip],
+    ['Code notes',info.code],
+    ['Height',info.height],
+    ['Yard size',info.yard]
+  ].forEach(row=>{
+    const tr=document.createElement('tr');
+    const th=document.createElement('th');
+    const td=document.createElement('td');
+    th.scope='row';
+    th.textContent=row[0];
+    td.textContent=row[1];
+    tr.append(th,td);
+    table.appendChild(tr);
+  });
+
+  el('desc').appendChild(table);
+
+  el('opts').querySelectorAll('button').forEach(b=>{
+    const on=b.dataset.k===k;
+    b.classList.toggle('on',on);
+    b.setAttribute('aria-pressed',String(on));
+  });
+
+  checkZones();
+  setView(activeView);
+}
+
+function setView(v){
+  activeView=v;
+  controls.update();
+
+  const c=OPTIONS[current].W/2;
+  const views={
+    iso:[[c-30,-22,58],[c,30,0]],
+    iso2:[[c+30,86,58],[c,34,0]],
+    plan:[[c,31.9,118],[c,31.89,0]],
+    close:current==='M'?
+      [[c-9,3.5,12],[c,13.8,2.4]]:
+      [[14,8,10],[7.1,12,1.4]],
+    eye:current==='M'?
+      [[c,-6,4.4],[c,30,3]]:
+      [[1.5,-6,4.4],[1.5,30,3]]
+  };
+
+  const q=views[v]||views.iso;
+  camera.position.copy(P(q[0]));
+  controls.target.copy(P(q[1]));
+  controls.update();
+
+  if(
+    matchMedia('(max-width:700px)').matches&&
+    ['iso','iso2','plan'].includes(v)
+  ){
+    // Fit the entire yard into the unobscured phone canvas.
+    camera.updateMatrixWorld();
+
+    const outward=camera.position.clone()
+      .sub(controls.target).normalize();
+
+    const right=new THREE.Vector3()
+      .setFromMatrixColumn(camera.matrixWorld,0);
+
+    const up=new THREE.Vector3()
+      .setFromMatrixColumn(camera.matrixWorld,1);
+
+    const tan=Math.tan(camera.fov*Math.PI/360);
+    let distance=0;
+
+    [-1,OPTIONS[current].W+2].forEach(x=>
+      [-1,65.83].forEach(y=>
+        [-2,8.5].forEach(z=>{
+          const p=P([x,y,z]).sub(controls.target);
+          const depth=p.dot(outward);
+
+          distance=Math.max(
+            distance,
+            depth+Math.abs(p.dot(right))/(tan*camera.aspect),
+            depth+Math.abs(p.dot(up))/tan
+          );
+        })
+      )
+    );
+
+    camera.position.copy(controls.target)
+      .addScaledVector(outward,distance*1.06);
+
+    controls.update();
+  }
+}
+
+Object.keys(names).forEach(k=>{
+  const b=document.createElement('button');
+  b.className='btn';
+  b.textContent=names[k];
+  b.dataset.k=k;
+  b.onclick=()=>build(k);
+  el('opts').appendChild(b);
+});
+
+el('views').querySelectorAll('button').forEach(b=>{
+  b.onclick=()=>setView(b.dataset.view);
+});
+
+['tZ','tB','tL','tF','tG'].forEach(id=>{
+  el(id).onchange=visibility;
+});
+
+el('check').onclick=checkZones;
+
+el('collapse').onclick=()=>{
+  const hidden=el('panel').classList.toggle('collapsed');
+  document.body.classList.toggle('panel-collapsed',hidden);
+  el('collapse').textContent=hidden?'Show':'Hide';
+  el('collapse').setAttribute('aria-expanded',String(!hidden));
+  resize();
+};
+
+function resize(){
+  const b=cv.getBoundingClientRect();
+  renderer.setSize(b.width,b.height,false);
+  camera.aspect=b.width/b.height;
+  camera.updateProjectionMatrix();
+}
+
+addEventListener('resize',resize);
+resize();
+build('M');
+
+renderer.setAnimationLoop(()=>{
+  controls.update();
+  renderer.render(scene,camera);
+});
+
+document.body.dataset.ready='1';
+</script>
+</body>
+</html>
