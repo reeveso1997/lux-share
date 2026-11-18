@@ -632,6 +632,24 @@ footer { padding: 4px 4px 16px; border: 0; font-size: 10px; line-height: 1.6; }
 #routeEditorLayer { pointer-events: none; }
 @media print { #routeEditorHud, #routeEditorTip, #routeEditorLayer { display: none !important; } }
 
+#flipDialog {
+  width: min(680px, calc(100vw - 40px));
+  max-height: 80vh;
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid #aab5c0;
+  border-radius: 12px;
+  color: #172534;
+  background: white;
+}
+#flipDialog::backdrop { background: #17253488; }
+#flipProblems { padding-left: 22px; }
+#flipProblems li + li { margin-top: 6px; }
+#flipSize { font-weight: 600; }
+#rackNote:empty, #flipNote:empty { display: none; }
+@media print {
+  #flipDialog { display: none !important; }
+}
 </style>
 </head>
 <body>
@@ -651,6 +669,8 @@ footer { padding: 4px 4px 16px; border: 0; font-size: 10px; line-height: 1.6; }
 <div id="printSummary"></div>
 <noscript>This planner requires JavaScript and the adjacent layouts.js file.</noscript>
 <script src="layouts.js"></script>
+<script src="parametric.js"></script>
+<script src="catalog_ext.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script>
@@ -1379,6 +1399,1297 @@ function v3Tree(l,m){
 
 
 
+
+/* ==== v3 merge: walkway v4 (walk_final.js) ==== */
+// Feet internally; change walkway.widthInches to configure the clear width.
+function walkClip(a, b, r) {
+  let lo = 0, hi = 1;
+  for (let k = 0; k < 2; k++) {
+    const d = b[k] - a[k], min = k ? r.y : r.x;
+    const max = min + (k ? r.h : r.w);
+    if (Math.abs(d) < 1e-9) {
+      if (a[k] <= min + 1e-8 || a[k] >= max - 1e-8) return null;
+    } else {
+      const ts = [(min - a[k]) / d, (max - a[k]) / d]
+        .sort((x, y) => x - y);
+      lo = Math.max(lo, ts[0]);
+      hi = Math.min(hi, ts[1]);
+      if (lo >= hi - 1e-8) return null;
+    }
+  }
+  return [lo, hi]; // Parallel tangency at the corridor edge is allowed.
+}
+
+function walkGate(l, gate) {
+  const es = polygonEdges(l.fence), g = gate || l.gate || {};
+  if (Number.isInteger(g.edge) && es[g.edge]?.len >= 12) {
+    return {
+      e: es[g.edge], edge: g.edge,
+      offset: Math.max(0, Math.min(es[g.edge].len - 12,
+        Number(g.offset) || 0))
+    };
+  }
+  const n = {N:[0,1], S:[0,-1], E:[1,0], W:[-1,0]}[g.side];
+  const choices = es.map((e, edge) => ({e, edge}))
+    .filter(q => q.e.len >= 12 &&
+      (!n || q.e.out[0]*n[0] + q.e.out[1]*n[1] > .9));
+  const q = choices.sort((a, b) => b.e.len - a.e.len)[0];
+  if (!q) return null;
+  const k = Math.abs(q.e.t[0]) > .5 ? 0 : 1;
+  const from = Number.isFinite(g.from) ? g.from :
+    Math.min(q.e.a[k], q.e.b[k]) + (q.e.len - 12)/2;
+  q.offset = Math.max(0, Math.min(q.e.len - 12,
+    q.e.t[k] > 0 ? from - q.e.a[k] : q.e.a[k] - from - 12));
+  return q;
+}
+
+function walkway(l, gate, widthInches = walkway.widthInches || 36) {
+  if (!(widthInches > 0) || !Number.isFinite(widthInches))
+    throw Error('Invalid walkway width');
+
+  const g = walkGate(l, gate), half = widthInches/24;
+  const solids = [
+    ...l.units, ...(l.pads || []), ...(l.rack ? [l.rack] : [])
+  ];
+  const key = JSON.stringify([
+    widthInches, g && [g.edge, g.offset],
+    l.fence, solids, l.zones, l.rackWork
+  ]);
+  const cache = walkway.cache || (walkway.cache = new WeakMap());
+  let entries = cache.get(l);
+  if (entries?.has(key)) return entries.get(key);
+  if (!entries) cache.set(l, entries = new Map());
+
+  const out = {
+    widthInches, polylines: [], corridors: [],
+    polygons: [], errors: [], reached: []
+  };
+  const finish = () => {
+    if (entries.size > 7) entries.clear();
+    entries.set(key, out);
+    return out;
+  };
+  if (!g || half*2 > 12) {
+    out.errors.push('Walkway: no usable gate opening');
+    return finish();
+  }
+
+  const overlaps = (a, b) =>
+    a.x < b.x+b.w-1e-8 && a.x+a.w > b.x+1e-8 &&
+    a.y < b.y+b.h-1e-8 && a.y+a.h > b.y+1e-8;
+  const fenceEdges = polygonEdges(l.fence);
+  const clear = p => {
+    const square = {
+      x:p[0]-half, y:p[1]-half, w:2*half, h:2*half
+    };
+    if (solids.some(s => overlaps(square, s))) return false;
+    // Corners plus edges protect concave fence notches.
+    const corners = [
+      [square.x, square.y],
+      [square.x+square.w, square.y],
+      [square.x, square.y+square.h],
+      [square.x+square.w, square.y+square.h]
+    ];
+    return corners.every(p => crOn(p, l.fence)) &&
+      !fenceEdges.some(e => walkClip(e.a, e.b, square));
+  };
+
+  const X = [], Y = [];
+  const add = p => { X.push(p[0]); Y.push(p[1]); };
+  const lanes = [];
+
+  // Mandatory control-front and access aisles. Conduit geometry does not
+  // influence these targets or move the walkway around a bad route.
+  for (const u of l.units) for (const side of [u.control, u.access]) {
+    if (!side) continue;
+    const z = sideRect(u, side, 3.5);
+    const vertical = side === 'E' || side === 'W';
+    const a = vertical ?
+      [z.x+z.w/2, u.y] : [u.x, z.y+z.h/2];
+    const b = vertical ?
+      [a[0], u.y+u.h] : [u.x+u.w, a[1]];
+    const normal = {N:[0,1], S:[0,-1], E:[1,0], W:[-1,0]}[side];
+
+    // CS has an exact 36 in passage beside the rack. Choose the usable
+    // position within the working-space strip rather than insisting on
+    // its nominal center.
+    const candidates = [1.75, half, 3.5-half].map(depth => {
+      const shift = depth-1.75;
+      const p = a.map((v,k) => v+normal[k]*shift);
+      const q = b.map((v,k) => v+normal[k]*shift);
+      const score = Array.from({length:33}, (_,i) =>
+        clear(p.map((v,k) => v+(q[k]-v)*i/32)))
+        .filter(Boolean).length;
+      return {a:p, b:q, score};
+    }).sort((a,b) => b.score-a.score);
+
+    const lane = {
+      ...candidates[0], unit:u.id, control:side === u.control
+    };
+    add(lane.a);
+    add(lane.b);
+
+    // Continue shared access aisles around the cabinet ends.
+    if (!lane.control)
+      for (const [p, sign] of [[lane.a,-1], [lane.b,1]]) {
+        const q = p.slice();
+        q[vertical ? 1 : 0] += sign*1.75;
+        if (clear(q)) {
+          p[vertical ? 1 : 0] = q[vertical ? 1 : 0];
+          add(q);
+        }
+      }
+    lanes.push(lane);
+  }
+
+  for (const p of l.fence) {
+    add(p);
+    add([p[0]+half, p[1]+half]);
+    add([p[0]-half, p[1]-half]);
+  }
+  for (const s of solids) {
+    X.push(s.x-half, s.x+s.w+half);
+    Y.push(s.y-half, s.y+s.h+half);
+  }
+
+  const rw = l.rackWork;
+  if (!rw) {
+    out.errors.push('Walkway: rack working space is missing');
+    return finish();
+  }
+  add([rw.x+rw.w/2, rw.y+rw.h/2]);
+  X.push(rw.x+half, rw.x+rw.w-half);
+  Y.push(rw.y+half, rw.y+rw.h-half);
+
+  const mouth = [], e = g.e;
+  for (let t=half; t<=12-half+1e-8; t+=.25) {
+    const p = [
+      e.a[0]+e.t[0]*(g.offset+t),
+      e.a[1]+e.t[1]*(g.offset+t)
+    ];
+    const q = [p[0]-e.out[0]*half, p[1]-e.out[1]*half];
+    mouth.push({p,q});
+    add(q);
+  }
+
+  const bounds = [
+    Math.min(...l.fence.map(p => p[0])),
+    Math.min(...l.fence.map(p => p[1])),
+    Math.max(...l.fence.map(p => p[0])),
+    Math.max(...l.fence.map(p => p[1]))
+  ];
+  for (let x=bounds[0]+half; x<=bounds[2]-half; x+=.5) X.push(x);
+  for (let y=bounds[1]+half; y<=bounds[3]-half; y+=.5) Y.push(y);
+
+  const unique = (a,lo,hi) => a
+    .filter(v => v>=lo-1e-8 && v<=hi+1e-8)
+    .sort((a,b) => a-b)
+    .filter((v,i,a) => !i || v-a[i-1]>1e-8);
+  const xs = unique(X, bounds[0]+half, bounds[2]-half);
+  const ys = unique(Y, bounds[1]+half, bounds[3]-half);
+  const nx = xs.length, size = nx*ys.length;
+  if (size > 400000) {
+    out.errors.push('Walkway: grid limit exceeded');
+    return finish();
+  }
+
+  const point = i => [xs[i%nx], ys[Math.floor(i/nx)]];
+  const id = p => {
+    const x = xs.findIndex(v => Math.abs(v-p[0])<1e-8);
+    const y = ys.findIndex(v => Math.abs(v-p[1])<1e-8);
+    return x<0 || y<0 ? -1 : x+nx*y;
+  };
+  const valid = new Uint8Array(size);
+  for (let i=0; i<size; i++) valid[i] = clear(point(i));
+
+  const neighbors = i => {
+    const x=i%nx, y=Math.floor(i/nx), ns=[];
+    if (x) ns.push([i-1,0]);
+    if (x+1<nx) ns.push([i+1,0]);
+    if (y) ns.push([i-nx,1]);
+    if (y+1<ys.length) ns.push([i+nx,1]);
+    return ns.filter(([j]) => valid[j] &&
+      clear(point(i).map((v,k) => (v+point(j)[k])/2)));
+  };
+
+  // Direction belongs to the search state; each bend costs 2 ft.
+  const search = (starts, goals) => {
+    const dist = new Float64Array(size*2).fill(Infinity);
+    const prev = new Int32Array(size*2).fill(-1);
+    const heap = new Heap();
+    for (const i of starts) for (let d=0; d<2; d++) {
+      dist[2*i+d] = 0;
+      heap.push([0,2*i+d]);
+    }
+    while (heap.length) {
+      const [cost,s] = heap.pop(), i=s>>1;
+      if (cost > dist[s]+1e-8) continue;
+      if (goals.has(i)) {
+        const p=[];
+        for (let t=s; t>=0; t=prev[t]) p.push(point(t>>1));
+        return p.reverse();
+      }
+      for (const [j,d] of neighbors(i)) {
+        const p=point(i), q=point(j), t=2*j+d;
+        const c=cost+Math.abs(p[0]-q[0])+Math.abs(p[1]-q[1])+
+          ((s&1)===d ? 0 : 2);
+        if (c < dist[t]-1e-8) {
+          dist[t]=c;
+          prev[t]=s;
+          heap.push([c,t]);
+        }
+      }
+    }
+    return null;
+  };
+
+  const network = new Set(), used = new Set();
+  const addPath = (path,kind) => {
+    if (!path?.length) return;
+    for (const p of path) {
+      const i=id(p);
+      if (i>=0 && i<size && valid[i]) network.add(i);
+    }
+    const flat=v3Flat(path);
+    if (flat.length<2) return;
+    const k=JSON.stringify(flat);
+    if (used.has(k)) return;
+    used.add(k);
+    out.polylines.push({kind,path:flat});
+    for (let i=1; i<flat.length; i++) {
+      const a=flat[i-1], b=flat[i];
+      const v=Math.abs(a[0]-b[0])<1e-8;
+      out.corridors.push({
+        x:Math.min(a[0],b[0])-(v?half:0),
+        y:Math.min(a[1],b[1])-(v?0:half),
+        w:v?2*half:Math.abs(a[0]-b[0]),
+        h:v?Math.abs(a[1]-b[1]):2*half
+      });
+    }
+    for (let i=1; i<flat.length-1; i++)
+      out.corridors.push({
+        x:flat[i][0]-half, y:flat[i][1]-half,
+        w:2*half, h:2*half
+      });
+  };
+
+  const starts=mouth.filter(m => valid[id(m.q)]);
+  const rackGoals=new Set();
+  for (let i=0; i<size; i++) if (valid[i]) {
+    const p=point(i);
+    if (p[0]>=rw.x+half-1e-8 && p[0]<=rw.x+rw.w-half+1e-8 &&
+        p[1]>=rw.y+half-1e-8 && p[1]<=rw.y+rw.h-half+1e-8)
+      rackGoals.add(i);
+  }
+  const first=search(starts.map(m => id(m.q)), rackGoals);
+  if (!first) {
+    out.errors.push('Walkway: gate cannot reach BCP + EMS at this clear width');
+    return finish();
+  }
+  const entry=starts.find(m => id(m.q)===id(first[0]));
+  addPath([entry.p,...first], 'gate to BCP + EMS');
+
+  // Return toward the gate/front, then walk down shared access aisles.
+  // This avoids inventing a continuous walk across service-gap mouths.
+  const front=new Set([id(first[0])]);
+  const ordered=lanes.slice()
+    .sort((a,b) => Number(a.control)-Number(b.control));
+
+  for (const lane of ordered) {
+    const vertical=Math.abs(lane.a[0]-lane.b[0])<1e-8;
+    const axis=vertical?1:0, cells=[];
+    for (let i=0; i<size; i++) if (valid[i]) {
+      const p=point(i);
+      if (Math.abs(p[1-axis]-lane.a[1-axis])<1e-8 &&
+          p[axis]>=lane.a[axis]-1e-8 &&
+          p[axis]<=lane.b[axis]+1e-8) cells.push(i);
+    }
+    if (!cells.length) {
+      out.errors.push(`Walkway: BESS-${lane.unit} ${
+        lane.control?'control':'access'
+      } aisle is blocked at ${widthInches} in`);
+      continue;
+    }
+
+    // Visit every physically clear fragment without drawing through solids.
+    let group=[];
+    const connect = () => {
+      if (!group.length) return;
+      const ends=[group[0],group.at(-1)].sort((a,b) => {
+        const pa=point(a), pb=point(b);
+        return (pb[0]-pa[0])*e.out[0]+(pb[1]-pa[1])*e.out[1];
+      });
+      const join=search(
+        [...(lane.control?network:front)],
+        new Set(lane.control?group:[ends[0]])
+      );
+      if (!join) {
+        out.errors.push(`Walkway: BESS-${lane.unit} aisle is unreachable`);
+      } else {
+        addPath(join,'aisle connection');
+        addPath(group.map(point),'row aisle');
+        if (!lane.control) for (const p of join) front.add(id(p));
+        if (lane.control && !out.reached.includes(lane.unit))
+          out.reached.push(lane.unit);
+      }
+      group=[];
+    };
+    for (const i of cells) {
+      if (group.length &&
+          !neighbors(group.at(-1)).some(([j]) => j===i)) connect();
+      group.push(i);
+    }
+    connect();
+  }
+
+  out.errors=[...new Set(out.errors)];
+  out.polygons=out.corridors.map(r => [
+    [r.x,r.y], [r.x+r.w,r.y],
+    [r.x+r.w,r.y+r.h], [r.x,r.y+r.h]
+  ]);
+  return finish();
+}
+
+function walkOwnTail(l,r,path) {
+  const u=l.units.find(u => u.id===r.unit);
+  if (!u || !path.length) return null;
+  const bandBox=band(u), end=path.at(-1), f=face(u);
+  if (Math.hypot(end[0]-f.drop[0],end[1]-f.drop[1])>.55) return null;
+  const contains = p =>
+    p[0]>=bandBox.x-1e-8 && p[0]<=bandBox.x+bandBox.w+1e-8 &&
+    p[1]>=bandBox.y-1e-8 && p[1]<=bandBox.y+bandBox.h+1e-8;
+  if (!contains(end)) return null;
+  let start=path.length-1;
+  while (start>0 && contains(path[start-1])) start--;
+  return {box:bandBox,start:Math.max(1,start)};
+}
+
+function walkApply(l,m,method,gate) {
+  const suffix='crosses the walkway (gate to BCP + EMS)';
+  m.messages=(m.messages||[]).filter(s =>
+    !s.includes(suffix) && !s.startsWith('Walkway:'));
+  for (const r of m.runs)
+    r.issues=(r.issues||[]).filter(s => !s.includes(suffix));
+  m.walkwayConflicts=[];
+  if (!['LR','MS'].includes(method)) return m;
+
+  const w=walkway(l,gate);
+  m.walkway=w;
+  for (const r of m.runs)
+    for (const [channel,path] of [
+      ['power',r.path], ['Cat6',r.dataPath||r.path]
+    ]) {
+      const own=walkOwnTail(l,r,path);
+      let hit=false;
+      for (let i=1; i<path.length && !hit; i++) {
+        const a=path[i-1], b=path[i], dz=b[2]-a[2];
+        for (const corridor of w.corridors) {
+          const span=walkClip(a,b,corridor);
+          if (!span) continue;
+          let [lo,hi]=span;
+
+          // Claude 11/18: clip to the portion below 6 ft 6 in headroom (a 3 ft spine rack blocks a walkway as much as conduit on grade).
+          if (Math.abs(dz)<1e-9) {
+            if (a[2]>=6.5-1e-8) continue;
+          } else {
+            const t=(6.5-a[2])/dz;
+            if (dz>0) hi=Math.min(hi,t);
+            else lo=Math.max(lo,t);
+          }
+          if (lo>=hi-1e-8) continue;
+
+          // Exempt only the contiguous terminal suffix within its own
+          // 6 in control-face band, never an earlier crossing of that face.
+          const allowed=own && i>=own.start ?
+            walkClip(a,b,own.box) : null;
+          if (allowed &&
+              lo>=allowed[0]-1e-8 && hi<=allowed[1]+1e-8) continue;
+          hit=true;
+          break;
+        }
+      }
+      if (hit) {
+        const reason=`${channel} ${suffix}`;
+        r.issues.push(reason);
+        m.walkwayConflicts.push(`BESS-${r.unit} ${reason}`);
+      }
+    }
+
+  m.walkwayConflicts=[...new Set(m.walkwayConflicts)];
+  m.messages=[...new Set([
+    ...m.messages,...w.errors,...m.walkwayConflicts
+  ])];
+  return m;
+}
+
+function walkPlan() {
+  const svg=$('plan');
+  svg.querySelectorAll('[data-walkway]').forEach(n => n.remove());
+  if (!layout || !state.toggles.walkway) return;
+  const w=walkway(layout,state.gate);
+  const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+  g.setAttribute('data-walkway','');
+  g.setAttribute('pointer-events','none');
+  const points = p => p.map(bessPlanPoint)
+    .map(p => p.join(',')).join(' ');
+
+  g.innerHTML=w.polygons.map(p =>
+    `<polygon points="${points(p)}" fill="#6ec58b" fill-opacity=".12"/>`
+  ).join('') + w.polylines.map(({path,kind}) =>
+    `<polyline points="${points(path)}" fill="none" stroke="#348951"
+      stroke-opacity=".7" stroke-width=".07" stroke-dasharray=".35 .3">
+      <title>${esc(kind)}</title></polyline>`
+  ).join('');
+
+  const path=w.polylines[0]?.path;
+  if (path?.length>1) {
+    const a=bessPlanPoint(path[0]), b=bessPlanPoint(path[1]);
+    if (Math.hypot(b[0]-a[0],b[1]-a[1])>0) {
+      const x=a[0]+(b[0]-a[0])*.7, y=a[1]+(b[1]-a[1])*.7;
+      const angle=Math.atan2(b[1]-a[1],b[0]-a[0])*180/Math.PI;
+      g.innerHTML+=`<path
+        d="M -.55 0 H .55 M .1 -.35 L .55 0 L .1 .35"
+        transform="translate(${x} ${y}) rotate(${angle})"
+        fill="none" stroke="#26743f" stroke-width=".13">
+        <title>Walkway: gate to BCP + EMS and every control aisle</title>
+        </path>`;
+    }
+  }
+  const anchor=svg.querySelector('.bp-run,[data-v3-bundles]');
+  if (anchor) anchor.before(g);
+  else svg.appendChild(g);
+}
+
+function walkThree() {
+  if (!layout || !three || !state.toggles.walkway) return;
+  const w=walkway(layout,state.gate), vertices=[];
+  for (const polygon of w.polygons) {
+    const p=polygon.map(p => {
+      const q=transform(p);
+      return [q[0],.035,-q[1]];
+    });
+    for (const i of [0,1,2,0,2,3]) vertices.push(...p[i]);
+  }
+  const geometry=new THREE.BufferGeometry();
+  geometry.setAttribute('position',
+    new THREE.Float32BufferAttribute(vertices,3));
+  const mesh=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({
+    color:'#66bb80', transparent:true, opacity:.22,
+    side:THREE.DoubleSide, depthWrite:false,
+    polygonOffset:true, polygonOffsetFactor:-1, polygonOffsetUnits:-1
+  }));
+  mesh.name='walkway';
+  three.group.add(mesh);
+}
+
+function walkInit() {
+  if (walkInit.done) return;
+  walkInit.done=true;
+  let q={};
+  try {
+    q=JSON.parse(decodeURIComponent(location.hash.slice(1)))||{};
+  } catch (_) {}
+  state.toggles.walkway=typeof q.toggles?.walkway==='boolean' ?
+    q.toggles.walkway : true;
+
+  if (!document.querySelector('[data-toggle="walkway"]')) {
+    const label=document.createElement('label');
+    label.innerHTML=
+      '<input type="checkbox" data-toggle="walkway"> Walkway';
+    document.querySelector('.toggles').appendChild(label);
+    const input=label.querySelector('input');
+    input.checked=state.toggles.walkway;
+    input.onchange=()=>{
+      state.toggles.walkway=input.checked;
+      render();
+    };
+  }
+
+  // Preserve the existing checkMethod contract and all existing checks.
+  const check=checkMethod, panel=updatePanel;
+  const plan=drawPlan, build=buildThree;
+  checkMethod=function(l,m,method) {
+    check(l,m,method);
+    walkApply(l,m,method,l===layout?state.gate:null);
+  };
+  updatePanel=function(...args) {
+    if (layout) for (const k of ['LR','MS'])
+      if (routes[k]) walkApply(layout,routes[k],k,state.gate);
+    return panel(...args);
+  };
+  drawPlan=function(...args) {
+    const result=plan(...args);
+    walkPlan();
+    return result;
+  };
+  buildThree=function(...args) {
+    const result=build(...args);
+    walkThree();
+    return result;
+  };
+
+  // Drawn routes receive the same checks as computed/catalog overrides.
+  if (typeof editorMethod==='function') {
+    const edit=editorMethod;
+    editorMethod=function(base,list,method) {
+      return walkApply(layout,edit(base,list,method),method,state.gate);
+    };
+  }
+  routeCache.clear();
+}
+
+/* ==== v3 merge: flip + move rack v4 (flip_final.js) ==== */
+/* Call flipInit() AFTER editorInit(), BEFORE final refreshSelection(true). */
+
+function flipCopy(v) { return JSON.parse(JSON.stringify(v)); }
+
+function flipSide(s, f) {
+  if (f.x) s = ({E:'W', W:'E'})[s] || s;
+  if (f.y) s = ({N:'S', S:'N'})[s] || s;
+  return s;
+}
+
+function flipPoint(p, l, f) {
+  return [f.x ? l.W-p[0] : p[0], f.y ? l.D-p[1] : p[1]];
+}
+
+function flipRect(r, l, f) {
+  return {...r, x:f.x ? l.W-r.x-r.w : r.x,
+    y:f.y ? l.D-r.y-r.h : r.y};
+}
+
+function flipRezone(l) {
+  l.zones = l.units.flatMap(u => {
+    u.access = ({S:'E', N:'W', W:'S', E:'N'})[u.control];
+    u.stub = v3Stub(u);
+    return ['control','access'].map(kind =>
+      ({...sideRect(u,u[kind],3.5), unit:u.id, kind}));
+  });
+  l.W = Math.max(...l.fence.map(p=>p[0]));
+  l.D = Math.max(...l.fence.map(p=>p[1]));
+  l.sf = Math.abs(l.fence.reduce((s,a,i)=> {
+    const b=l.fence[(i+1)%l.fence.length];
+    return s+a[0]*b[1]-a[1]*b[0];
+  },0))/2;
+  return l;
+}
+
+function flipGate(l, g=l.gate) {
+  const es=polygonEdges(l.fence);
+  if (Number.isInteger(g?.edge) && es[g.edge]?.len>=12-EPS)
+    return {edge:g.edge,
+      offset:Math.max(0,Math.min(es[g.edge].len-12,g.offset||0))};
+  const n=({S:[0,-1],N:[0,1],E:[1,0],W:[-1,0]})[g?.side];
+  const i=es.findIndex(e=>e.len>=12-EPS&&
+    (!n||e.out[0]*n[0]+e.out[1]*n[1]>.9));
+  if(i<0)return null;
+  const e=es[i],a=Math.abs(e.t[0])>.5?0:1;
+  const from=Number.isFinite(g?.from)
+    ?g.from:Math.min(e.a[a],e.b[a])+(e.len-12)/2;
+  return {edge:i,offset:Math.max(0,Math.min(e.len-12,
+    e.t[a]>0?from-e.a[a]:e.a[a]-from-12))};
+}
+
+function flipAttachGate(l,g) {
+  if(!g)return;
+  const e=polygonEdges(l.fence)[g.edge],a=Math.abs(e.t[0])>.5?0:1;
+  l.gate={...g,len:12,
+    side:Math.abs(e.out[0])>.5
+      ?(e.out[0]>0?'E':'W'):(e.out[1]>0?'N':'S'),
+    from:Math.min(e.a[a]+e.t[a]*g.offset,
+      e.a[a]+e.t[a]*(g.offset+12))};
+}
+
+function flipMirror(base,f) {
+  const l=flipCopy(base),g=flipGate(base),n=base.fence.length;
+  l.fence=base.fence.map(p=>flipPoint(p,base,f));
+  // Preserve CCW winding for outward normals and gate offsets.
+  if(f.x!==f.y)l.fence.reverse();
+  l.units=base.units.map(u=>({
+    ...flipRect(u,base,f),control:flipSide(u.control,f)
+  }));
+  if(base.pads)l.pads=base.pads.map(r=>flipRect(r,base,f));
+  l.rack={...flipRect(base.rack,base,f),
+    side:flipSide(base.rack.side,f)};
+  l.rackWork=flipRect(base.rackWork,base,f);
+  if(g)flipAttachGate(l,f.x!==f.y?{
+    edge:(n-2-g.edge+n)%n,
+    offset:polygonEdges(base.fence)[g.edge].len-g.offset-12
+  }:g);
+  l.trunk=[]; l.branches=[]; l.flip={...f};
+  return flipRezone(l);
+}
+
+function flipOverlap(a,b) {
+  return a.x<b.x+b.w-EPS&&a.x+a.w>b.x+EPS&&
+    a.y<b.y+b.h-EPS&&a.y+a.h>b.y+EPS;
+}
+
+function flipInside(r,l) {
+  // Exact orthogonal cell test: corners alone miss an L-yard notch.
+  const xs=crUnique([r.x,r.x+r.w,...l.fence.map(p=>p[0])
+    .filter(x=>x>r.x&&x<r.x+r.w)]);
+  const ys=crUnique([r.y,r.y+r.h,...l.fence.map(p=>p[1])
+    .filter(y=>y>r.y&&y<r.y+r.h)]);
+  for(let i=1;i<xs.length;i++)for(let j=1;j<ys.length;j++)
+    if(!crOn([(xs[i-1]+xs[i])/2,(ys[j-1]+ys[j])/2],l.fence))
+      return false;
+  return true;
+}
+
+function flipGap(a,b,side) {
+  return ({
+    E:b.x-a.x-a.w,W:a.x-b.x-b.w,
+    N:b.y-a.y-a.h,S:a.y-b.y-b.h
+  })[side];
+}
+
+function flipProblems(l) {
+  const out=[],solids=[
+    ...l.units.map(u=>({...u,label:'BESS-'+u.id})),
+    ...(l.pads||[]).map((p,i)=>({...p,label:'pad '+(i+1)})),
+    {...l.rack,label:'BCP + EMS rack'}
+  ];
+  for(const z of l.zones){
+    const u=l.units.find(u=>u.id===z.unit),side=u[z.kind];
+    for(const b of solids)if(flipOverlap(z,b)){
+      const gap=flipGap(u,b,side);
+      const back=z.kind==='access'&&Math.abs(gap-1)<EPS?'back ':'';
+      out.push({a:u,b,side,
+        text:`BESS-${u.id} ${z.kind} zone now falls in the ${fmt(gap)} ft ${back}gap with ${b.label}.`});
+    }
+    if(!flipInside(z,l))out.push({a:u,side,
+      text:`BESS-${u.id} ${z.kind} zone extends outside the fence (${side} face).`});
+  }
+  for(const b of solids.filter(b=>b.label!=='BCP + EMS rack')){
+    if(flipOverlap(l.rack,b))
+      out.push({text:`BCP + EMS rack overlaps ${b.label}.`});
+    if(flipOverlap(l.rackWork,b))out.push({
+      a:l.rack,b,side:({N:'S',S:'N',E:'W',W:'E'})[l.rack.side],
+      text:`Rack working space overlaps ${b.label}.`
+    });
+    if(!flipInside(b,l))
+      out.push({text:`${b.label} extends outside the fence.`});
+  }
+  for(const [r,name] of [
+    [l.rack,'Rack'],[l.rackWork,'Rack working space']
+  ])if(!flipInside(r,l))
+    out.push({text:`${name} extends outside the fence.`});
+  return out;
+}
+
+function flipRackAt(l,edge,offset) {
+  const e=polygonEdges(l.fence)[edge];
+  if(!e||e.len<6-EPS)
+    throw Error('That fence edge is shorter than the 6 ft rack.');
+  const t=Math.max(0,Math.min(e.len-6,offset));
+  const p=[e.a[0]+e.t[0]*t,e.a[1]+e.t[1]*t];
+  const q=[p[0]+6*e.t[0],p[1]+6*e.t[1]];
+  const side=Math.abs(e.out[0])>.5
+    ?(e.out[0]>0?'E':'W'):(e.out[1]>0?'N':'S');
+  const r={
+    x:Math.min(p[0],q[0])-Math.max(0,e.out[0]),
+    y:Math.min(p[1],q[1])-Math.max(0,e.out[1]),
+    w:Math.abs(e.t[0])*6+Math.abs(e.out[0]),
+    h:Math.abs(e.t[1])*6+Math.abs(e.out[1]),
+    side,inZone:false
+  };
+  return {
+    rack:r,
+    rackWork:sideRect(r,({N:'S',S:'N',E:'W',W:'E'})[side],3.5),
+    edge,offset:t
+  };
+}
+
+function flipRackAnchor(l) {
+  const r=l.rack,c=[r.x+r.w/2,r.y+r.h/2];
+  const options=polygonEdges(l.fence).map((e,i)=>({
+    e,i,d:Math.abs((c[0]-e.a[0])*e.out[0]+
+      (c[1]-e.a[1])*e.out[1])
+  }));
+  const q=options.filter(q=>q.e.len>=6&&q.d<.50001&&
+    (c[0]-q.e.a[0])*q.e.t[0]+(c[1]-q.e.a[1])*q.e.t[1]>=3-EPS&&
+    (c[0]-q.e.a[0])*q.e.t[0]+(c[1]-q.e.a[1])*q.e.t[1]
+      <=q.e.len-3+EPS)[0];
+  if(!q)throw Error('Rack is not anchored to a usable fence edge.');
+  return {edge:q.i,
+    offset:(c[0]-q.e.a[0])*q.e.t[0]+
+      (c[1]-q.e.a[1])*q.e.t[1]-3};
+}
+
+function flipStretch(l,axis,cut,amount) {
+  const key=axis?'y':'x',size=axis?'h':'w';
+  const map=p=>p.map((v,i)=>i===axis&&v>cut?v+amount:v);
+  const es=polygonEdges(l.fence),g=flipGate(l),ra=flipRackAnchor(l);
+  const center=(e,offset,len)=>[
+    e.a[0]+e.t[0]*(offset+len/2),
+    e.a[1]+e.t[1]*(offset+len/2)
+  ];
+  const gp=g&&map(center(es[g.edge],g.offset,12));
+  const rp=map(center(es[ra.edge],ra.offset,6));
+  l.fence=l.fence.map(map);
+  // Translate rigid objects; never stretch a cabinet or pad.
+  for(const r of [...l.units,...(l.pads||[])])
+    if(r[key]+r[size]/2>cut)r[key]+=amount;
+  const ne=polygonEdges(l.fence);
+  const along=(p,e)=>(p[0]-e.a[0])*e.t[0]+(p[1]-e.a[1])*e.t[1];
+  Object.assign(l,flipRackAt(l,ra.edge,along(rp,ne[ra.edge])-3));
+  if(g)flipAttachGate(l,{
+    edge:g.edge,
+    offset:Math.max(0,Math.min(ne[g.edge].len-12,
+      along(gp,ne[g.edge])-6))
+  });
+  return flipRezone(l);
+}
+
+function flipRepair(input) {
+  const l=flipCopy(input);
+  l.flipCuts ||= [];
+  // Repairs remove the CS exception and provide the full 42 in.
+  const anchor=flipRackAnchor(l);
+  Object.assign(l,flipRackAt(l,anchor.edge,anchor.offset));
+  for(let iteration=0;iteration<200;iteration++){
+    const problems=flipProblems(l);
+    if(!problems.length)return l;
+    const p=problems.find(p=>p.a&&p.side);
+    if(!p)throw Error(problems.map(p=>p.text).join(' '));
+    const axis='EW'.includes(p.side)?0:1;
+    const key=axis?'y':'x',size=axis?'h':'w';
+    const positive='EN'.includes(p.side);
+    const face=p.a[key]+(positive?p.a[size]:0);
+    let boundary;
+    if(p.b)boundary=positive?p.b[key]:p.b[key]+p.b[size];
+    else {
+      const other=1-axis,lo=other?'y':'x',sz=other?'h':'w';
+      const candidates=polygonEdges(l.fence).filter(e=>
+        Math.abs(e.out[axis]-(positive?1:-1))<EPS&&
+        Math.max(e.a[other],e.b[other])>p.a[lo]+EPS&&
+        Math.min(e.a[other],e.b[other])<p.a[lo]+p.a[sz]-EPS&&
+        (positive?e.a[axis]>=face-EPS:e.a[axis]<=face+EPS));
+      boundary=candidates.map(e=>e.a[axis])
+        .sort((a,b)=>Math.abs(a-face)-Math.abs(b-face))[0];
+    }
+    const gap=Math.abs(boundary-face);
+    if(!Number.isFinite(gap)||gap>=4-EPS)
+      throw Error('Cannot resolve: '+p.text);
+    const cut=(face+boundary)/2,amount=4-gap;
+    flipStretch(l,axis,cut,amount);
+    l.flipCuts.push({axis,cut,amount});
+  }
+  throw Error('Re-spacing did not converge; no geometry was applied.');
+}
+
+/* This declaration replaces the original whitelisted reader, including
+   its early startup call. The existing editor wrapper still preserves
+   drawnRoutes; existing save() serializes the additional state fields. */
+function readHash() {
+  let q={};
+  try { q=JSON.parse(decodeURIComponent(location.hash.slice(1)))||{}; }
+  catch(_) {}
+  for(const k of ['siteW','siteL'])
+    if(Number.isFinite(+q[k])&&+q[k]>=1&&+q[k]<=100000)state[k]=+q[k];
+  if([0,4,6,7,8,10].includes(+q.wanted))state.wanted=+q.wanted;
+  if(typeof q.code==='string')state.code=q.code;
+  if(Number.isInteger(q.rot))state.rot=((q.rot%4)+4)%4;
+  if(['SW','SE','NW','NE','C'].includes(q.position))
+    state.position=q.position;
+  if(['UG','LR','MS','OH','None'].includes(q.method))
+    state.method=q.method==='OH'?'UG':q.method;
+  if(['Plan','3D'].includes(q.view))state.view=q.view;
+  state.gate=q.gate&&Number.isInteger(q.gate.edge)&&
+    Number.isFinite(q.gate.offset)?{...q.gate}:null;
+  if(q.toggles)for(const k in state.toggles)
+    if(typeof q.toggles[k]==='boolean')state.toggles[k]=q.toggles[k];
+
+  state.flip={x:q.flip?.x===true,y:q.flip?.y===true};
+  state.flipSpace={};state.rackMoves={};state.gateMoves={};
+  for(const c of (window.BESS?.catalog||[])){
+    for(const bits of ['00','10','01','11']){
+      const k=c.code+':'+bits,cuts=q.flipSpace?.[k];
+      if(Array.isArray(cuts)&&cuts.length<=200&&cuts.every(a=>
+        (a.axis===0||a.axis===1)&&
+        Number.isFinite(a.cut)&&Math.abs(a.cut)<100000&&
+        Number.isFinite(a.amount)&&a.amount>0&&a.amount<10000))
+        state.flipSpace[k]=flipCopy(cuts);
+    }
+    for(const name of ['rackMoves','gateMoves']){
+      const a=q[name]?.[c.code];
+      if(a&&Number.isInteger(a.edge)&&a.edge>=0&&a.edge<6&&
+        Number.isFinite(a.t)&&a.t>=0&&a.t<=1)
+        state[name][c.code]={edge:a.edge,t:a.t};
+    }
+  }
+  if(flipInit.data){
+    flipInit.data.cache.clear();
+    flipInit.data.metrics.clear();
+    flipInit.data.moving=false;
+  }
+}
+
+function flipKey(code=state.code,f=state.flip) {
+  return code+':'+(+f.x)+(+f.y);
+}
+
+function flipSpec(l,g,len) {
+  const es=polygonEdges(l.fence),e=es[g.edge];
+  const reverse=l.flip.x!==l.flip.y,t=(g.offset+len/2)/e.len;
+  return {
+    edge:reverse?(es.length-2-g.edge+es.length)%es.length:g.edge,
+    t:reverse?1-t:t
+  };
+}
+
+function flipUnspec(l,spec,len) {
+  const es=polygonEdges(l.fence),reverse=l.flip.x!==l.flip.y;
+  const edge=reverse
+    ?(es.length-2-spec.edge+es.length)%es.length:spec.edge;
+  const e=es[edge];
+  if(!e||e.len<len-EPS)
+    throw Error(`Saved placement needs a ${len} ft fence edge.`);
+  return {edge,offset:Math.max(0,Math.min(e.len-len,
+    (reverse?1-spec.t:spec.t)*e.len-len/2))};
+}
+
+function flipCandidate(code=state.code,f=state.flip) {
+  const key=JSON.stringify([
+    code,f,state.flipSpace?.[flipKey(code,f)],
+    state.rackMoves?.[code],state.gateMoves?.[code]
+  ]);
+  const cache=flipInit.data?.cache;
+  if(cache?.has(key))return cache.get(key);
+
+  const l=flipMirror(BESS.build(code),f);
+  const cuts=state.flipSpace?.[flipKey(code,f)]||[];
+  for(const a of cuts)flipStretch(l,a.axis,a.cut,a.amount);
+  l.flipCuts=flipCopy(cuts);
+  if(state.rackMoves?.[code]){
+    const g=flipUnspec(l,state.rackMoves[code],6);
+    Object.assign(l,flipRackAt(l,g.edge,g.offset));
+  }
+  if(state.gateMoves?.[code])
+    flipAttachGate(l,flipUnspec(l,state.gateMoves[code],12));
+
+  // Retain documented catalog exceptions only for untouched baseline yards.
+  const baseline=!f.x&&!f.y&&!state.rackMoves?.[code]&&
+    !state.flipSpace?.[flipKey(code,f)];
+  const problems=baseline?[]:flipProblems(l);
+  l.modified=!baseline;
+  const result={l,problems};
+  cache?.set(key,result);
+  return result;
+}
+
+function flipOffer(candidate,apply,cancel=()=>{}) {
+  const d=flipInit.data,dialog=$('flipDialog');
+  if(dialog.open)dialog.close();
+  $('flipProblems').replaceChildren(...candidate.problems.map(p=>{
+    const li=document.createElement('li');
+    li.textContent=p.text;
+    return li;
+  }));
+  let repaired;
+  try{
+    repaired=flipRepair(candidate.l);
+    const [w,depth]=state.rot%2?['D','W']:['W','D'];
+    $('flipSize').textContent=
+      `Re-space to ${fmt(repaired[w])} × ${fmt(repaired[depth])} ft inside fence `+
+      `(+${fmt(repaired[w]-candidate.l[w])} W, `+
+      `+${fmt(repaired[depth]-candidate.l[depth])} D) at ${state.rot*90}°. `+
+      'Offending clear gaps become 4 ft; cabinets stay their original size.';
+  }catch(e){$('flipSize').textContent=e.message;}
+  $('flipApply').disabled=!repaired;
+  d.cancel=cancel;
+  $('flipApply').onclick=()=>{
+    d.cancel=null;dialog.close();apply(repaired);
+  };
+  $('flipCancel').onclick=()=>{
+    dialog.close();const fn=d.cancel;d.cancel=null;fn?.();
+  };
+  dialog.showModal();
+}
+
+function flipChoose(axis) {
+  if(!layout)return;
+  if(state.gate)
+    state.gateMoves[state.code]=flipSpec(layout,state.gate,12);
+  const f={...state.flip,[axis]:!state.flip[axis]};
+  const key=flipKey(state.code,f),previous=state.flipSpace[key];
+
+  // Mirror approved spacing too; another flip must not shrink the yard.
+  const base=BESS.build(state.code),size=[base.W,base.D];
+  const a=axis==='x'?0:1;
+  const cuts=(layout.flipCuts||[]).map(c=>{
+    const next={...c,cut:c.axis===a?size[a]-c.cut:c.cut};
+    size[c.axis]+=c.amount;
+    return next;
+  });
+  if(cuts.length)state.flipSpace[key]=cuts;
+  else delete state.flipSpace[key];
+  const candidate=flipCandidate(state.code,f);
+  if(previous)state.flipSpace[key]=previous;
+  else delete state.flipSpace[key];
+
+  const apply=repaired=>{
+    state.flip=f;
+    if(cuts.length)state.flipSpace[key]=cuts;
+    else delete state.flipSpace[key];
+    if(repaired)flipAccept(repaired);
+    state.gate=null;flipReload();
+  };
+  if(candidate.problems.length)flipOffer(candidate,apply);
+  else apply(false);
+}
+
+function flipAccept(l) {
+  state.flipSpace[flipKey()]=flipCopy(l.flipCuts||[]);
+  if(state.rackMoves[state.code])
+    state.rackMoves[state.code]=flipSpec(l,flipRackAnchor(l),6);
+  if(state.gateMoves[state.code])
+    state.gateMoves[state.code]=flipSpec(l,flipGate(l),12);
+}
+
+function flipReload() {
+  const d=flipInit.data;
+  d.cache.clear();d.metrics.clear();routeCache.clear();
+  d.moving=false;moveGate=false;
+  if(typeof editorCancel==='function')editorCancel(false);
+  if(three)three.key='';
+  loadLayout();matchTable();
+}
+
+/* Replaces loadLayout; transforms happen after BESS.build, before routing. */
+function loadLayout() {
+  // Early original startup precedes routing constants and editor setup.
+  if(!flipInit.data)return;
+  try{
+    const c=flipCandidate();
+    if(c.problems.length){
+      layout=null;
+      $('drawing').style.visibility='hidden';
+      $('empty').hidden=false;
+      $('empty').textContent=
+        'This yard needs re-spacing. Review the listed conflicts.';
+      flipOffer(c,repaired=>{
+        flipAccept(repaired);state.gate=null;flipReload();
+      },()=>{
+        state.flip={x:false,y:false};
+        delete state.rackMoves[state.code];
+        state.gate=null;flipReload();
+      });
+      return;
+    }
+    layout=flipCopy(c.l);
+    edges=polygonEdges(layout.fence);
+    state.gate=state.gateMoves[state.code]
+      ?flipGate(layout):flipGate(layout,state.gate||layout.gate);
+    flipAttachGate(layout,state.gate);
+    layout.walkway=flipWalkway(layout,state.gate);
+    routes=buildMethods(layout);
+    $('drawing').style.visibility='';
+    $('empty').hidden=true;
+    if(three)three.key='';
+    render(true);
+  }catch(e){
+    layout=null;
+    $('drawing').style.visibility='hidden';
+    $('empty').hidden=false;
+    $('empty').textContent=e.message;
+  }
+}
+
+function flipRackProblems(l,rack,work) {
+  const errors=[];
+  for(const [r,label] of [[rack,'Rack'],[work,'42 in working space']]){
+    if(!flipInside(r,l))
+      errors.push(label+' extends outside the fence.');
+    for(const u of l.units)if(flipOverlap(r,u))
+      errors.push(label+' overlaps BESS-'+u.id+' / its pad.');
+    for(const [i,p] of (l.pads||[]).entries())
+      if(flipOverlap(r,p))errors.push(label+' overlaps pad '+(i+1)+'.');
+  }
+  for(const z of l.zones)if(flipOverlap(rack,z))
+    errors.push(`Rack overlaps BESS-${z.unit} ${z.kind} zone.`);
+
+  // Physical rack cannot obstruct the gate. Work may share its interior aisle.
+  const g=state.gate&&polygonEdges(l.fence)[state.gate.edge];
+  if(g){
+    const a=[g.a[0]+g.t[0]*state.gate.offset,
+      g.a[1]+g.t[1]*state.gate.offset];
+    const b=[a[0]+12*g.t[0],a[1]+12*g.t[1]];
+    if(segmentHits([...a,.5],[...b,.5],.01,box(rack)))
+      errors.push('Rack obstructs the 12 ft gate opening.');
+  }
+  return [...new Set(errors)];
+}
+
+function flipRackClick(event) {
+  const d=flipInit.data;
+  if(!d.moving||!layout||state.view!=='Plan'||event.button!==0)return;
+  event.preventDefault();event.stopImmediatePropagation();
+  const p=planPoint(event),q=inverse([p.x,-p.y]);
+  const opts=edges.map((e,i)=>{
+    const t=Math.max(0,Math.min(e.len,
+      (q[0]-e.a[0])*e.t[0]+(q[1]-e.a[1])*e.t[1]));
+    return {e,i,t,d:Math.hypot(
+      q[0]-e.a[0]-t*e.t[0],q[1]-e.a[1]-t*e.t[1])};
+  }).sort((a,b)=>a.d-b.d);
+  const hit=opts[0],m=$('plan').getScreenCTM();
+  const tolerance=12/Math.max(.01,Math.hypot(m.a,m.b));
+  if(hit.d>tolerance){
+    $('rackNote').textContent=
+      'Click a fence edge (within 12 screen pixels).';
+    return;
+  }
+  try{
+    const placed=flipRackAt(layout,hit.i,hit.t-3);
+    const bad=flipRackProblems(layout,placed.rack,placed.rackWork);
+    if(bad.length){$('rackNote').textContent=bad.join(' ');return;}
+    state.rackMoves[state.code]=flipSpec(layout,placed,6);
+    d.moving=false;flipReload();
+    $('rackNote').textContent=
+      'Rack moved; routing and the gate-to-rack walkway were rebuilt.';
+  }catch(e){$('rackNote').textContent=e.message;}
+}
+
+function flipPanel() {
+  const d=flipInit.data;
+  if(!d)return;
+  for(const axis of ['x','y'])
+    $('flip-'+axis).setAttribute('aria-pressed',String(state.flip[axis]));
+  $('moveRack').setAttribute('aria-pressed',String(d.moving));
+  $('angle').textContent=
+    `${state.rot*90}° · site flip ${state.flip.x?'E–W ':''}`+
+    `${state.flip.y?'N–S':''}${!state.flip.x&&!state.flip.y?'off':''}`+
+    ' · true unit handedness';
+  $('flipNote').textContent=layout?.modified
+    ?'Original code:method route overrides are skipped for this geometry.':'';
+  for(const id of [
+    'routeEditorToggle','routeEditorPencil','routeEditorExport'
+  ])if($(id))$(id).disabled=!!layout?.modified;
+}
+
+function flipRackOverlay() {
+  if(!flipInit.data.moving||!layout)return;
+  const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+  g.innerHTML=edges.map(e=>{
+    const a=transform(e.a),b=transform(e.b);
+    return `<line x1="${a[0]}" y1="${-a[1]}" x2="${b[0]}" y2="${-b[1]}"
+      stroke="#397eaa" stroke-width="5" opacity=".55"
+      vector-effect="non-scaling-stroke"/>`;
+  }).join('');
+  $('plan').appendChild(g);
+}
+
+function flipWalkway(l,g) {
+  if(!g)return {rects:[],error:'No 12 ft gate is available for a walkway.'};
+  const e=polygonEdges(l.fence)[g.edge],width=3.5,r=width/2;
+  const gate=[e.a[0]+e.t[0]*(g.offset+6),
+    e.a[1]+e.t[1]*(g.offset+6)];
+  const start=gate.map((v,i)=>v-e.out[i]*r);
+  const w=l.rackWork,target=[w.x+w.w/2,w.y+w.h/2];
+  const solids=[...l.units,...(l.pads||[]),l.rack];
+  const cfg={l,rects:solids,width:r};
+  const X=crUnique([
+    start[0],target[0],
+    ...l.fence.flatMap(p=>[p[0]-r,p[0]+r]),
+    ...solids.flatMap(b=>[b.x-r,b.x+b.w+r])
+  ]);
+  const Y=crUnique([
+    start[1],target[1],
+    ...l.fence.flatMap(p=>[p[1]-r,p[1]+r]),
+    ...solids.flatMap(b=>[b.y-r,b.y+b.h+r])
+  ]);
+  const lines=[];
+  const clear=(a,b)=>crClear(cfg,a,b)&&flipInside({
+    x:Math.min(a[0],b[0])-r,y:Math.min(a[1],b[1])-r,
+    w:Math.abs(a[0]-b[0])+width,h:Math.abs(a[1]-b[1])+width
+  },l);
+  for(let i=0;i<X.length;i++)for(let j=0;j<Y.length;j++){
+    const a=[X[i],Y[j]];
+    if(i+1<X.length){
+      const b=[X[i+1],Y[j]];
+      if(clear(a,b))lines.push({a,b,axis:0});
+    }
+    if(j+1<Y.length){
+      const b=[X[i],Y[j+1]];
+      if(clear(a,b))lines.push({a,b,axis:1});
+    }
+  }
+  const path=v3Walk(v3Graph(lines,[start,target]),start,target)?.path;
+  if(!path)return {rects:[],
+    error:'No clear 42 in gate-to-rack walkway; move the gate or rack.'};
+  const points=[gate,...path],rects=[];
+  for(let i=1;i<points.length;i++){
+    const a=points[i-1],b=points[i];
+    const vertical=Math.abs(a[0]-b[0])<EPS;
+    rects.push({
+      x:Math.min(a[0],b[0])-(vertical?r:0),
+      y:Math.min(a[1],b[1])-(vertical?0:r),
+      w:Math.abs(a[0]-b[0])+(vertical?width:0),
+      h:Math.abs(a[1]-b[1])+(vertical?0:width)
+    });
+  }
+  return {rects,path:points};
+}
+
+function flipMetrics(code) {
+  const d=flipInit.data;
+  if(d.metrics.has(code))return d.metrics.get(code);
+  const {l,problems}=flipCandidate(code);
+  if(problems.length)return {
+    paired:0,ventPairs:0,aisles:0,longest:0,
+    conduit:Infinity,bends:Infinity,disposition:'Re-space required'
+  };
+  // Ranking uses UG; avoid computing grade methods for every table row.
+  const m=v3ApplyOverrides(l,v3Route(l,'UG'),'UG'),gs=v3Gaps(l);
+  checkMethod(l,m,'UG');
+  let aisles=0;
+  for(let i=0;i<l.zones.length;i++)
+    for(let j=i+1;j<l.zones.length;j++)
+      if(l.zones[i].unit!==l.zones[j].unit&&
+        flipOverlap(l.zones[i],l.zones[j]))aisles++;
+  const out={
+    paired:2*gs.filter(g=>g.kind==='back').length,
+    ventPairs:gs.filter(g=>g.kind==='couple').length,
+    aisles,
+    longest:Math.max(0,...(m.corridors||[]).map(s=>
+      Math.hypot(s.b[0]-s.a[0],s.b[1]-s.a[1]))),
+    conduit:m.powerLength,bends:m.powerBends,disposition:'Keep'
+  };
+  d.metrics.set(code,out);
+  return out;
+}
+
+function flipInit() {
+  if(flipInit.data)return;
+  flipInit.data={
+    cache:new Map(),metrics:new Map(),moving:false,cancel:null
+  };
+  state.flip ||= {x:false,y:false};
+  state.flipSpace ||= {};state.rackMoves ||= {};state.gateMoves ||= {};
+
+  $('rotate').insertAdjacentHTML('afterend',
+    '<button id="flip-x" type="button" aria-pressed="false">Flip E–W</button>'+
+    '<button id="flip-y" type="button" aria-pressed="false">Flip N–S</button>');
+  $('resetGate').insertAdjacentHTML('afterend',
+    '<button id="moveRack" type="button" aria-pressed="false">Move rack</button>'+
+    '<button id="resetRack" type="button">Default rack</button>');
+  $('gateNote').insertAdjacentHTML('afterend',
+    '<p id="rackNote" class="note" role="status"></p>'+
+    '<p id="flipNote" class="note"></p>');
+  document.body.insertAdjacentHTML('beforeend',
+    '<dialog id="flipDialog" aria-labelledby="flipTitle">'+
+    '<h2 id="flipTitle">Flip needs re-spacing</h2>'+
+    '<p>The proposed geometry has these conflicts:</p>'+
+    '<ul id="flipProblems"></ul><p id="flipSize"></p>'+
+    '<div class="row"><button id="flipApply" type="button">Re-space</button>'+
+    '<button id="flipCancel" type="button">Cancel</button></div></dialog>');
+  $('flipDialog').addEventListener('cancel',()=>{
+    const fn=flipInit.data.cancel;flipInit.data.cancel=null;fn?.();
+  });
+  for(const a of ['x','y'])$('flip-'+a).onclick=()=>flipChoose(a);
+
+  $('moveRack').onclick=()=>{
+    if(!layout)return;
+    const d=flipInit.data;d.moving=!d.moving;
+    moveGate=false;
+    $('moveGate').setAttribute('aria-pressed','false');
+    editorCancel(false);
+    if(d.moving)setView('Plan');
+    flipPanel();drawPlan();
+    $('rackNote').textContent=d.moving
+      ?'Click a fence edge to center the 6 ft rack; its 42 in working space faces inward.':'';
+  };
+  $('resetRack').onclick=()=>{
+    delete state.rackMoves[state.code];flipReload();
+  };
+  for(const id of ['moveGate','threeView'])
+    $(id).addEventListener('click',()=>{
+      flipInit.data.moving=false;flipPanel();
+    },true);
+  for(const id of ['routeEditorToggle','routeEditorPencil'])
+    $(id)?.addEventListener('click',()=>{
+      flipInit.data.moving=false;flipPanel();
+    },true);
+  $('plan').addEventListener('pointerdown',flipRackClick,
+    {capture:true,passive:false});
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){
+      flipInit.data.moving=false;flipPanel();drawPlan();
+    }
+  });
+
+  const oldPlan=drawPlan,oldPanel=updatePanel,oldConfig=crConfig;
+  const oldOverride=v3ApplyOverrides,oldUsing=editorUsing;
+  const oldGateClick=gateClick,oldCheck=checkMethod;
+  drawPlan=function(){oldPlan();flipRackOverlay();};
+  updatePanel=function(){oldPanel();flipPanel();};
+  crConfig=function(l,method,...rest){
+    const c=oldConfig(l,method,...rest);
+    if(method!=='UG')c.rects.push(...(l.walkway?.rects||[]));
+    return c;
+  };
+  v3ApplyOverrides=function(l,m,method){
+    if(l.modified){
+      m.warnings.push('Unflipped code:method overrides skipped for changed geometry.');
+      return m;
+    }
+    return oldOverride(l,m,method);
+  };
+  // Existing drawn routes also use unflipped code:method keys.
+  editorUsing=function(fn){return layout?.modified?fn():oldUsing(fn);};
+  checkMethod=function(l,m,method){
+    oldCheck(l,m,method);
+    if(l.walkway?.error&&method!=='UG')m.messages.push(l.walkway.error);
+    if(method!=='UG')for(const run of m.runs)
+      for(const path of [run.path,run.dataPath||[]])
+        for(let i=1;i<path.length;i++){
+          const a=path[i-1],b=path[i];
+          if(l.walkway?.rects.some(r=>
+            segmentHits(a,b,R,box(r,-.1,6.6)))){
+            const msg=run.label+': crosses the gate-to-rack walkway';
+            if(!m.messages.includes(msg))m.messages.push(msg);
+            if(!run.issues.includes(msg))run.issues.push(msg);
+          }
+        }
+  };
+  gateClick=function(e){
+    const before=JSON.stringify(state.gate),used=oldGateClick(e);
+    if(used&&layout&&JSON.stringify(state.gate)!==before){
+      state.gateMoves[state.code]=flipSpec(layout,state.gate,12);
+      flipReload();
+    }
+    return used;
+  };
+  $('resetGate').onclick=()=>{
+    delete state.gateMoves[state.code];state.gate=null;flipReload();
+  };
+
+  rpRoutingMetrics=flipMetrics;
+  const oldTable=matchTable,oldSorted=sortedMatches;
+  sortedMatches=function(){
+    for(const c of catalog){
+      const q=flipCandidate(c.code);
+      Object.assign(c,{
+        fence_W_ft:q.l.W,fence_D_ft:q.l.D,sf:q.l.sf,
+        fits_18ft_stall:Math.min(q.l.W,q.l.D)<=18+EPS
+      });
+    }
+    return oldSorted();
+  };
+  matchTable=function(){
+    const result=oldTable();
+    for(const row of $('matches').querySelectorAll('tbody [data-code]')){
+      if(flipCandidate(row.dataset.code).problems.length){
+        const note=document.createElement('small');
+        note.textContent=' · Re-space required';
+        row.firstElementChild.appendChild(note);
+      }
+    }
+    return result;
+  };
+  routeCache.clear();
+}
 
 /* ==== v3 merge: plan (plan_override.js) ==== */
 function bessPlanPoint(p){
@@ -3388,7 +4699,7 @@ function editorDefaultGate() {
 
 
 /* ==== v3 startup ==== */
-for (const f of [()=>crRegister(), ()=>rpInstallRankingControls(), ()=>designInit(), ()=>editorInit()]){try{f();}catch(e){console.error('startup',e);}}
+for (const f of [()=>crRegister(), ()=>rpInstallRankingControls(), ()=>designInit(), ()=>editorInit(), ()=>walkInit(), ()=>flipInit(), ()=>{if(typeof ugInit==='function')ugInit();}]){try{f();}catch(e){console.error('startup',e);}}
 try{refreshSelection(true);render(true);}catch(e){console.error('rerender',e);}
 })();
 </script>
