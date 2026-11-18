@@ -1400,6 +1400,661 @@ function v3Tree(l,m){
 
 
 
+/* ==== v3 merge: underground v4 (ug_final.js) ==== */
+/* Feet throughout. Trench quantities are unique centerline lengths.
+   Shared-tree heuristic: 100 * outside + inside, then bends, then inside.
+   Connected pours receive one shortest rack feeder. The shared trench is
+   inset by half its maximum width; short individual legs reach v3Stub(u). */
+
+function buildMethods(l) {
+  ugInstall();
+  crRegister();
+  for (const u of l.units) u.stub = v3Stub(u);
+  const out = {None: crEmpty()};
+  for (const k of ['UG', 'LR', 'MS']) {
+    out[k] = v3ApplyOverrides(l, v3Route(l, k), k);
+    checkMethod(l, out[k], k);
+  }
+  v3Gate(l, out.MS, null);
+  return out;
+}
+
+function ugMode() {
+  return ['group', 'pads', 'yard'].includes(state.newPour)
+    ? state.newPour : 'group';
+}
+
+function ugInit() {
+  ugInstall();
+}
+
+function ugPour(l, mode = ugMode()) {
+  const pads = l.units.map(u => ({
+    x: u.x - .25, y: u.y - .25, w: u.w + .5, h: u.h + .5
+  }));
+  const xs = crUnique([
+    ...l.fence.map(p => p[0]),
+    ...pads.flatMap(r => [r.x, r.x + r.w])
+  ]);
+  const ys = crUnique([
+    ...l.fence.map(p => p[1]),
+    ...pads.flatMap(r => [r.y, r.y + r.h])
+  ]);
+  const nx = xs.length - 1, ny = ys.length - 1;
+  const cells = new Uint8Array(nx * ny), legal = cells.slice();
+
+  for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+    const p = [(xs[x] + xs[x + 1]) / 2, (ys[y] + ys[y + 1]) / 2];
+    const i = y * nx + x;
+    legal[i] = crOn(p, l.fence) ? 1 : 0;
+    cells[i] = legal[i] &&
+      (mode === 'yard' || pads.some(r => inRect(p, r))) ? 1 : 0;
+  }
+
+  // Orthogonal hull: fill facing-pad gaps within uninterrupted fence slabs.
+  // Repetition closes staggered rows without filling an L-yard's notch.
+  if (mode === 'group') {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let axis = 0; axis < 2; axis++) {
+        for (let j = 0; j < (axis ? nx : ny); j++) {
+          const at = i => axis ? i * nx + j : j * nx + i;
+          let first = -1;
+          for (let i = 0; i < (axis ? ny : nx); i++) {
+            if (!legal[at(i)]) {
+              first = -1;
+              continue;
+            }
+            if (!cells[at(i)]) continue;
+            if (first >= 0) {
+              for (let k = first + 1; k < i; k++) {
+                if (!cells[at(k)]) {
+                  cells[at(k)] = 1;
+                  changed = true;
+                }
+              }
+            }
+            first = i;
+          }
+        }
+      }
+    }
+  }
+
+  // Non-overlapping rectangles: area and coverage never double-count.
+  const rects = [];
+  for (let y = 0; y < ny; y++) for (let x = 0; x < nx;) {
+    if (!cells[y * nx + x]) {
+      x++;
+      continue;
+    }
+    const start = x;
+    while (x < nx && cells[y * nx + x]) x++;
+    rects.push({
+      x: xs[start], y: ys[y],
+      w: xs[x] - xs[start], h: ys[y + 1] - ys[y]
+    });
+  }
+  return {
+    mode, rects,
+    area: rects.reduce((s, r) => s + r.w * r.h, 0)
+  };
+}
+
+function ugInside(p, pour) {
+  return pour.rects.some(r =>
+    p[0] >= r.x - EPS && p[0] <= r.x + r.w + EPS &&
+    p[1] >= r.y - EPS && p[1] <= r.y + r.h + EPS
+  );
+}
+
+function ugCore(p, pour, half) {
+  // Keep the shared trench's full width inside the new concrete.
+  const covered = pour.rects.reduce((s, r) => s +
+    Math.max(0,
+      Math.min(p[0] + half, r.x + r.w) -
+      Math.max(p[0] - half, r.x)) *
+    Math.max(0,
+      Math.min(p[1] + half, r.y + r.h) -
+      Math.max(p[1] - half, r.y)), 0);
+  return covered >= 4 * half * half - 1e-6;
+}
+
+function ugPieces(a, b, pour) {
+  const cuts = [0, 1], d = b.map((v, j) => v - a[j]);
+  for (const r of pour.rects) {
+    for (let j = 0; j < 2; j++) if (Math.abs(d[j]) > EPS) {
+      for (const v of j ? [r.y, r.y + r.h] : [r.x, r.x + r.w]) {
+        const t = (v - a[j]) / d[j];
+        if (t > EPS && t < 1 - EPS) cuts.push(t);
+      }
+    }
+  }
+  const ts = crUnique(cuts), out = [];
+  for (let i = 1; i < ts.length; i++) {
+    const point = t => a.map((v, j) => v + t * d[j]);
+    const p = point(ts[i - 1]), q = point(ts[i]);
+    out.push({
+      path: [p, q],
+      inside: ugInside(point((ts[i - 1] + ts[i]) / 2), pour),
+      length: Math.hypot(q[0] - p[0], q[1] - p[1])
+    });
+  }
+  return out;
+}
+
+function ugGraph(l, pour) {
+  const terminals = [rackPoints(l).center, ...l.units.map(v3Stub)];
+  const half = l.units.length <= 2 ? .5 : l.units.length <= 5 ? .75 : 1;
+  const coords = [0, 1].map(j => crUnique([
+    ...terminals.map(p => p[j]),
+    ...l.fence.map(p => p[j]),
+    ...pour.rects.flatMap(r =>
+      (j ? [r.y, r.y + r.h] : [r.x, r.x + r.w])
+        .flatMap(v => [v - half, v, v + half])),
+    ...l.units.map(u => j ? u.y + u.h / 2 : u.x + u.w / 2)
+  ]));
+  const [xs, ys] = coords, nodes = [], map = new Map(), edges = [];
+  const ids = ys.map(y => xs.map(x => {
+    if (!crOn([x, y], l.fence)) return -1;
+    const id = nodes.length;
+    nodes.push({p: [x, y], core: ugCore([x, y], pour, half), edges: []});
+    map.set(v3Key([x, y]), id);
+    return id;
+  }));
+
+  const add = (a, b, axis) => {
+    if (a < 0 || b < 0) return;
+    const p = nodes[a].p, q = nodes[b].p;
+    const mid = p.map((v, j) => (v + q[j]) / 2);
+    if (!crOn(mid, l.fence)) return;
+    const len = Math.abs(q[axis] - p[axis]);
+    const outside = ugInside(mid, pour) ? 0 : len;
+    const e = {
+      a, b, axis, len, outside, inside: len - outside, key: edges.length,
+      core: nodes[a].core && nodes[b].core && ugCore(mid, pour, half)
+    };
+    edges.push(e);
+    nodes[a].edges.push(e);
+    nodes[b].edges.push(e);
+  };
+  for (let y = 0; y < ys.length; y++) {
+    for (let x = 0; x < xs.length; x++) {
+      if (x) add(ids[y][x - 1], ids[y][x], 0);
+      if (y) add(ids[y - 1][x], ids[y][x], 1);
+    }
+  }
+  return {
+    nodes, map, edges,
+    root: map.get(v3Key(terminals[0])),
+    targets: terminals.slice(1).map(p => map.get(v3Key(p)))
+  };
+}
+
+function ugWalk(g, seeds, goal, allow = () => true, feed = false) {
+  const dist = new Map(), prev = new Map(), heap = [];
+  const push = q => {
+    let i = heap.length;
+    heap.push(q);
+    while (i) {
+      const p = (i - 1) >> 1;
+      if (!v3Less(q.d, heap[p].d)) break;
+      heap[i] = heap[p];
+      i = p;
+    }
+    heap[i] = q;
+  };
+  const pop = () => {
+    const first = heap[0], last = heap.pop();
+    if (heap.length) {
+      let i = 0;
+      while (i * 2 + 1 < heap.length) {
+        let c = i * 2 + 1;
+        if (c + 1 < heap.length && v3Less(heap[c + 1].d, heap[c].d)) c++;
+        if (!v3Less(heap[c].d, last.d)) break;
+        heap[i] = heap[c];
+        i = c;
+      }
+      heap[i] = last;
+    }
+    return first;
+  };
+
+  for (const [node, dir] of seeds) {
+    const k = node * 3 + dir, d = [0, 0, 0];
+    dist.set(k, d);
+    push({k, d});
+  }
+  while (heap.length) {
+    const {k, d} = pop();
+    if (dist.get(k) !== d) continue;
+    const n = Math.floor(k / 3), dir = k % 3;
+    if (goal(n)) {
+      const edges = [], nodes = [n];
+      let s = k;
+      while (prev.has(s)) {
+        const p = prev.get(s);
+        edges.push(p.e);
+        s = p.k;
+        nodes.push(Math.floor(s / 3));
+      }
+      return {nodes: nodes.reverse(), edges: edges.reverse(), score: d};
+    }
+    for (const e of g.nodes[n].edges) if (allow(e)) {
+      const v = e.a === n ? e.b : e.a, nk = v * 3 + e.axis;
+      const nd = [
+        d[0] + (feed ? e.len : 100 * e.outside + e.inside),
+        d[1] + (dir !== 2 && dir !== e.axis ? 1 : 0),
+        d[2] + e.inside
+      ];
+      if (v3Less(nd, dist.get(nk))) {
+        dist.set(nk, nd);
+        prev.set(nk, {k, e});
+        push({k: nk, d: nd});
+      }
+    }
+  }
+  return null;
+}
+
+function ugRoute(l) {
+  const m = crEmpty(), pour = ugPour(l), g = ugGraph(l, pour);
+  const parent = new Map(), dirs = new Map([[g.root, 2]]);
+  m.pour = pour;
+
+  const feed = ugWalk(
+    g, [[g.root, 2]],
+    n => ugInside(g.nodes[n].p, pour),
+    () => true, true
+  );
+  const add = w => {
+    for (let i = 1; i < w.nodes.length; i++) {
+      parent.set(w.nodes[i], w.nodes[i - 1]);
+      dirs.set(w.nodes[i], w.edges[i - 1].axis);
+    }
+  };
+  if (!feed) {
+    m.extra.push('UG: no rack connection to new pour');
+    return m;
+  }
+  add(feed);
+  m.feed = feed.nodes.map(n => [...g.nodes[n].p, -1.75]);
+
+  const entry = feed.nodes.at(-1);
+  const reachable = new Set([entry]), stack = [entry];
+  while (stack.length) {
+    const n = stack.pop();
+    for (const e of g.nodes[n].edges) if (e.outside < EPS) {
+      const v = e.a === n ? e.b : e.a;
+      if (!reachable.has(v)) {
+        reachable.add(v);
+        stack.push(v);
+      }
+    }
+  }
+  const connected = g.targets.every(n => reachable.has(n));
+
+  // Terminal tails use the shortest in-pour connection to the inset core.
+  const tails = connected ? g.targets.map(n => ugWalk(
+    g, [[n, 2]], k => g.nodes[k].core, e => e.outside < EPS, true
+  )) : [];
+  const coreFeed = connected ? ugWalk(
+    g, [[entry, dirs.get(entry)]],
+    n => g.nodes[n].core, e => e.outside < EPS, true
+  ) : null;
+
+  const coreReach = new Set(), todo = [];
+  if (coreFeed) {
+    todo.push(coreFeed.nodes.at(-1));
+    coreReach.add(todo[0]);
+  }
+  while (todo.length) {
+    const n = todo.pop();
+    for (const e of g.nodes[n].edges) if (e.core) {
+      const v = e.a === n ? e.b : e.a;
+      if (!coreReach.has(v)) {
+        coreReach.add(v);
+        todo.push(v);
+      }
+    }
+  }
+
+  const inset = !!coreFeed &&
+    tails.every(t => t && coreReach.has(t.nodes.at(-1)));
+  if (inset) add(coreFeed);
+  const targets = inset ? tails.map(t => t.nodes.at(-1)) : g.targets;
+  const pending = new Set(targets.filter(n => !dirs.has(n)));
+
+  while (pending.size) {
+    const seeds = [...dirs].filter(([n]) =>
+      inset ? g.nodes[n].core : !connected || reachable.has(n));
+    const w = ugWalk(
+      g, seeds, n => pending.has(n),
+      e => inset ? e.core : !connected || e.outside < EPS
+    );
+    if (!w) {
+      m.extra.push('UG: disconnected terminal');
+      break;
+    }
+    add(w);
+    for (const n of w.nodes) pending.delete(n);
+  }
+
+  for (let i = 0; i < l.units.length; i++) {
+    let n = targets[i];
+    if (!dirs.has(n)) continue;
+    const path = [g.nodes[n].p];
+    while (parent.has(n)) {
+      n = parent.get(n);
+      path.push(g.nodes[n].p);
+    }
+    const flat = path.reverse();
+    if (inset) {
+      flat.push(...tails[i].nodes.slice().reverse().map(n => g.nodes[n].p));
+    }
+    v3Finish(l, m, 'UG', l.units[i], v3Flat(flat), 'new pour');
+  }
+  m.insetTrunk = inset;
+  return m;
+}
+
+function ugMeasure(l, m) {
+  m.pour = ugPour(l);
+  v3Bundles(m);
+  m.trench = [];
+  for (const b of m.bundles) {
+    b.trenchWidth = b.conduits <= 4 ? 1 : b.conduits <= 10 ? 1.5 : 2;
+    const [a, z] = b.path;
+    if (a[2] >= 0 || z[2] >= 0 ||
+        Math.hypot(a[0] - z[0], a[1] - z[1]) < EPS) continue;
+    for (const p of ugPieces(a, z, m.pour)) {
+      m.trench.push({...b, ...p, width: b.trenchWidth});
+    }
+  }
+  m.trenchOutside = m.trench.filter(s => !s.inside)
+    .reduce((a, s) => a + s.length, 0);
+  m.trenchInside = m.trench.filter(s => s.inside)
+    .reduce((a, s) => a + s.length, 0);
+  m.newPourArea = m.pour.area;
+  m.busiestConduits = Math.max(0, ...m.trench.map(s => s.conduits));
+  return m;
+}
+
+function ugCheck(l, m) {
+  const messages = new Set(m.extra || []), source = rackPoints(l).center;
+  for (const u of l.units) {
+    if (!m.runs.some(r => r.unit === u.id)) {
+      messages.add(`BESS-${u.id}: missing UG run`);
+    }
+  }
+
+  for (const r of m.runs) {
+    const reasons = new Set(), notes = new Set();
+    const u = l.units.find(u => u.id === r.unit);
+    if (!u) {
+      messages.add('UG: unknown unit');
+      continue;
+    }
+    for (const path of [r.path, r.dataPath || r.path]) {
+      for (let i = 1; i < path.length; i++) {
+        const a = path[i - 1], b = path[i];
+        if (![...a, ...b].every(Number.isFinite)) {
+          reasons.add('non-finite coordinate');
+        }
+        if (a.filter((v, j) => Math.abs(v - b[j]) > EPS).length > 1) {
+          reasons.add('non-orthogonal segment');
+        }
+
+        // Test every fence slab, including concave L-yard notches.
+        const ts = [0, 1];
+        for (const p of l.fence) for (let j = 0; j < 2; j++) {
+          if (Math.abs(b[j] - a[j]) > EPS) {
+            const t = (p[j] - a[j]) / (b[j] - a[j]);
+            if (t > 0 && t < 1) ts.push(t);
+          }
+        }
+        const tt = crUnique(ts);
+        for (let j = 1; j < tt.length; j++) {
+          const t = (tt[j - 1] + tt[j]) / 2;
+          if (!crOn(a.map((v, k) => v + t * (b[k] - v)), l.fence)) {
+            reasons.add('outside fence');
+          }
+        }
+        if (!crOn(a, l.fence) || !crOn(b, l.fence)) {
+          reasons.add('outside fence');
+        }
+
+        for (const v of l.units) {
+          const pad = {
+            x: v.x - .25, y: v.y - .25, w: v.w + .5, h: v.h + .5
+          };
+          if (Math.min(a[2], b[2]) < 0 &&
+              segmentHits(a, b, 0, box(pad, -100, 100))) {
+            notes.add(`runs under BESS-${v.id} pad; place before the pour`);
+          }
+          if (segmentHits(a, b, R, box(v, 0, 7))) {
+            reasons.add(`intersects BESS-${v.id} cabinet`);
+          }
+        }
+
+        // Below-grade routes are exempt; exposed risers still get checked.
+        for (const z of l.zones) {
+          let bs = [box(z)];
+          if (z.unit === u.id && z.kind === 'control') {
+            bs = bs.flatMap(bb => subtract(bb, box(band(u))));
+          }
+          if (l.rack.inZone && [a, b].every(p =>
+              Math.hypot(p[0] - source[0], p[1] - source[1]) < EPS)) {
+            bs = bs.flatMap(bb => subtract(bb, box(l.rack)));
+            notes.add(
+              'Catalog CS rack-in-zone exception retained at rack riser; engineer acceptance required.'
+            );
+          }
+          if (bs.some(bb => segmentHits(a, b, R, bb))) {
+            reasons.add(`crosses unit ${z.unit} ${z.kind} zone`);
+          }
+        }
+      }
+    }
+
+    if (v3Key(r.path[0].slice(0, 2)) !== v3Key(source)) {
+      reasons.add('does not start at rack');
+    }
+    if (v3Key(r.path.at(-1).slice(0, 2)) !== v3Key(v3Stub(u))) {
+      reasons.add('does not end at exterior stub-up');
+    }
+    if (r.maxPullDegrees > 360.001) {
+      reasons.add('exceeds 360 degrees between pull points');
+    }
+    r.notes = [
+      ...(r.notes || []).filter(s => !s.startsWith('runs under BESS-')),
+      ...notes
+    ];
+    r.issues = [...reasons];
+    for (const s of reasons) messages.add(`${r.label}: ${s}`);
+    r.powerLength = pathLength(r.path);
+    r.dataLength = pathLength(r.dataPath || r.path);
+    r.bends = crBends(r.path).count;
+    r.dataBends = crBends(r.dataPath || r.path).count;
+  }
+
+  m.powerLength = m.runs.reduce((s, r) => s + r.powerLength, 0);
+  m.dataLength = m.runs.reduce((s, r) => s + r.dataLength, 0);
+  m.cableLength = m.powerLength;
+  m.powerBends = m.runs.reduce((s, r) => s + r.bends, 0);
+  m.dataBends = m.runs.reduce((s, r) => s + r.dataBends, 0);
+  m.totalBends = m.powerBends + m.dataBends;
+  m.maxBends = Math.max(0, ...m.runs.map(r => r.bends));
+  m.messages = [...messages];
+  m.warnings = [];
+  ugMeasure(l, m);
+}
+
+function ugPlan() {
+  if (!layout || state.method !== 'UG') return;
+  const svg = $('plan'), m = routes.UG;
+  svg.querySelectorAll(
+    '[data-ug-pour],[data-ug-trench],[data-v3-bundles]'
+  ).forEach(e => e.remove());
+  svg.querySelectorAll('.bp-run').forEach(e => e.style.display = 'none');
+
+  const group = (key, html) => {
+    const g = document.createElementNS(svg.namespaceURI, 'g');
+    g.setAttribute(key, '');
+    g.innerHTML = html;
+    return g;
+  };
+  const points = ps => ps.map(p => bessPlanPoint(p).join(',')).join(' ');
+  const pour = group('data-ug-pour', m.pour.rects.map(r =>
+    `<polygon points="${points(rectPoints(r))}" fill="#d8d6d1" opacity=".65"/>`
+  ).join(''));
+  const floor = svg.querySelector('.bp-sketch > polygon');
+  if (floor) floor.after(pour);
+
+  const lines = m.trench.map(s =>
+    `<polyline points="${points(s.path)}" fill="none"
+      stroke="${s.inside ? '#ba9568' : '#e65d32'}"
+      stroke-width="${s.width}" stroke-dasharray=".65 .28" opacity=".8">
+      <title>${s.inside ? 'New-pour trench' : 'saw-cut + patch'};
+      ${s.conduits} conduits; ${s.width * 12} in</title>
+    </polyline>`
+  ).join('');
+  const boxes = (m.pullBoxes || []).map(pb => {
+    const p = bessPlanPoint(pb.point);
+    return `<rect x="${p[0] - .2}" y="${p[1] - .2}" width=".4" height=".4"
+      fill="#fff1ad" stroke="#655119" stroke-width=".05">
+      <title>Pull point: ${esc(pb.units.join(', '))}</title></rect>`;
+  }).join('');
+  svg.appendChild(group('data-ug-trench', lines + boxes));
+}
+
+function ugThree(c) {
+  const m = routes.UG;
+  if (!m.trench) return;
+  for (const s of m.trench) {
+    const [a, b] = s.path, w = s.width;
+    const vertical = Math.abs(a[0] - b[0]) < EPS;
+    lux3dBox(c, {
+      x: Math.min(a[0], b[0]) - (vertical ? w / 2 : 0),
+      y: Math.min(a[1], b[1]) - (vertical ? 0 : w / 2),
+      w: vertical ? w : Math.abs(a[0] - b[0]),
+      h: vertical ? Math.abs(a[1] - b[1]) : w
+    }, -2.1, 1.8, lux3dMaterial(c, '#947048', .25));
+  }
+}
+
+function ugPanel() {
+  const select = $('ugNewPour');
+  if (select) select.value = ugMode();
+  if (!layout || state.method !== 'UG') return;
+
+  const m = routes.UG, entries = [
+    ['Trench outside new pour', `${fmt(m.trenchOutside, 2)} ft`],
+    ['Trench inside new pour', `${fmt(m.trenchInside, 2)} ft`],
+    ['New-pour area', `${fmt(m.newPourArea, 2)} sf`],
+    ['Busiest trench segment', `${m.busiestConduits} conduits`]
+  ];
+  $('summary').insertAdjacentHTML('beforeend',
+    entries.map(([a, b]) => `<div>${a}<strong>${b}</strong></div>`).join(''));
+  $('methodNote').textContent =
+    'Tan dashed: trench in new pour. Orange-red: saw-cut + patch. ' +
+    'Gray: new concrete. Separate power and Cat6 conduits per unit; ' +
+    'below-grade pad crossings go in before the pour.';
+  $('caption').textContent += ' · Orange-red: saw-cut + patch';
+}
+
+function ugInstall() {
+  if (ugInstall.done) return;
+  ugInstall.done = true;
+
+  const read = () => {
+    let q = {};
+    try {
+      q = JSON.parse(decodeURIComponent(location.hash.slice(1))) || {};
+    } catch (_) {}
+    state.newPour = ['group', 'pads', 'yard'].includes(q.newPour)
+      ? q.newPour : 'group';
+    routeCache.clear();
+    if (typeof flipInit === 'function') flipInit.data?.metrics.clear();
+  };
+  read();
+  const oldRead = readHash;
+  readHash = function(...a) {
+    oldRead(...a);
+    read();
+  };
+
+  const oldRoute = v3Route, oldCheck = checkMethod;
+  const oldPlan = v3PlanExtras, oldTrench = lux3dTrench;
+  const oldPanel = updatePanel, oldSummary = summaryText;
+  const oldEditor = editorMethod, oldSegments = editorSegments;
+
+  v3Route = function(l, k) {
+    return k === 'UG' ? ugRoute(l) : oldRoute(l, k);
+  };
+  checkMethod = function(l, m, k) {
+    return k === 'UG' ? ugCheck(l, m) : oldCheck(l, m, k);
+  };
+  v3PlanExtras = function() {
+    return state.method === 'UG' ? ugPlan() : oldPlan();
+  };
+  lux3dTrench = function(c, runs) {
+    return state.method === 'UG' ? ugThree(c) : oldTrench(c, runs);
+  };
+  updatePanel = function(...a) {
+    const r = oldPanel(...a);
+    ugPanel();
+    return r;
+  };
+  summaryText = function(...a) {
+    const s = oldSummary(...a), m = routes.UG;
+    return state.method === 'UG' ? s +
+      ` Trench outside new pour ${fmt(m.trenchOutside, 2)} ft;` +
+      ` inside ${fmt(m.trenchInside, 2)} ft;` +
+      ` new pour ${fmt(m.newPourArea, 2)} sf;` +
+      ` busiest segment ${m.busiestConduits} conduits.` : s;
+  };
+  editorMethod = function(base, list, k) {
+    const m = oldEditor(base, list, k);
+    if (k === 'UG') ugCheck(layout, m);
+    return m;
+  };
+  editorSegments = function(path, units) {
+    if (state.method !== 'UG') return oldSegments(path, units);
+    return path.slice(1).map((b, i) => {
+      const a = path[i];
+      if (Math.max(a[2], b[2]) + R < 0) return [];
+      return oldSegments([a, b], units).flat().filter(s =>
+        !s.includes('cabinet / pad') ||
+        layout.units.some(u =>
+          s.startsWith('BESS-' + u.id + ' ') &&
+          segmentHits(a, b, R, box(u, 0, 7))));
+    });
+  };
+
+  if ($('methodNote') && !$('ugNewPour')) {
+    const label = document.createElement('label');
+    label.htmlFor = 'ugNewPour';
+    label.textContent = 'New pour';
+    const select = document.createElement('select');
+    select.id = 'ugNewPour';
+    select.innerHTML =
+      '<option value="group">Pads + between units (default)</option>' +
+      '<option value="pads">Pads only</option>' +
+      '<option value="yard">Whole yard</option>';
+    select.value = ugMode();
+    select.onchange = () => {
+      state.newPour = select.value;
+      routeCache.clear();
+      if (typeof flipInit === 'function') flipInit.data?.metrics.clear();
+      loadLayout();
+      save();
+    };
+    $('methodNote').before(label, select);
+  }
+}
+
 /* ==== v3 merge: walkway v4 (walk_final.js) ==== */
 // Feet internally; change walkway.widthInches to configure the clear width.
 function walkClip(a, b, r) {
