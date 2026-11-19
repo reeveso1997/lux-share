@@ -650,6 +650,10 @@ footer { padding: 4px 4px 16px; border: 0; font-size: 10px; line-height: 1.6; }
 @media print {
   #flipDialog { display: none !important; }
 }
+
+#chainControls{margin:.4rem 0}#chainControls select{width:100%}#chainControls .row{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem}
+.chain-table{width:100%;border-collapse:collapse;font-size:.78rem;margin:.5rem 0}.chain-table th,.chain-table td{border-bottom:1px solid #0001;padding:.18rem .3rem;text-align:left}
+.chain-table td.bad{color:#c11}
 </style>
 </head>
 <body>
@@ -671,6 +675,7 @@ footer { padding: 4px 4px 16px; border: 0; font-size: 10px; line-height: 1.6; }
 <script src="layouts.js"></script>
 <script src="parametric.js"></script>
 <script src="catalog_ext.js"></script>
+<script src="chain.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 <script>
@@ -5353,8 +5358,194 @@ function editorDefaultGate() {
 }
 
 
+/* ==== v5: daisy-chain routing (chain.js, Claude 11/19/26) ==== */
+// Reeves 11/19/26: link batteries battery-to-battery; no more than 360 degrees between pull points.
+// UG and LR now come from BESSCHAIN.route; MS stays as the old home-run trunk for comparison.
+function chainOptions(){const o={};if(+state.chainMax>0)o.maxPerChain=+state.chainMax;return o;}
+function chainSide(e){return e.out[1]<-.5?'S':e.out[1]>.5?'N':e.out[0]<-.5?'W':'E';}
+function chainPageGate(){
+  if(!state.gate||!edges[state.gate.edge])return null;
+  const e=edges[state.gate.edge],side=chainSide(e),ax=side==='N'||side==='S'?0:1;
+  const a=e.a[ax]+e.t[ax]*state.gate.offset,b=a+e.t[ax]*12;
+  return {side,at:e.a[ax?0:1],from:Math.min(a,b),len:12};
+}
+function chainGateToState(g){
+  if(!g)return null;
+  for(let i=0;i<edges.length;i++){const e=edges[i];if(chainSide(e)!==g.side||e.len<12-1e-6)continue;
+    const ax=g.side==='N'||g.side==='S'?0:1,lo=Math.min(e.a[ax],e.a[ax]+e.t[ax]*e.len),hi=Math.max(e.a[ax],e.a[ax]+e.t[ax]*e.len);
+    if(g.from<lo-1e-3||g.from+12>hi+1e-3)continue;
+    if(g.at!==undefined&&Math.abs(e.a[ax?0:1]-g.at)>1e-3)continue;
+    const off=e.t[ax]>0?g.from-e.a[ax]:e.a[ax]-(g.from+12);
+    return {edge:i,offset:Math.max(0,Math.min(e.len-12,off))};}
+  return null;
+}
+function chainMethod(l,k,extra){
+  const opts=Object.assign(chainOptions(),extra||{});
+  if(k==='LR'&&!opts.gate){const g=l===layout?chainPageGate():null;if(g)opts.gate=g;else opts.gateTries=1;}
+  let r;
+  try{r=BESSCHAIN.route(l,k,opts);}
+  catch(e){console.error('chain',e);const m=crEmpty();m.isChain=true;m.messages=['Routing error: '+e.message];return m;}
+  const m=crEmpty();m.isChain=true;m.chain=r;m.serviceGaps=[];m.unpaired=[];m.gateKey=l===layout?JSON.stringify(state.gate):null;
+  const z=k==='UG'?-1.75:.3,top=1.3,label=id=>id===0?'BCP':typeof id==='string'?id:'BESS-'+id;
+  for(const h of r.hops){
+    h.legs.forEach((g,i)=>{
+      const fromBox=i>0,toBox=i<h.legs.length-1,p=g.path;
+      const zA=fromBox?(k==='UG'?-1:z):(h.from===0?2:top),zB=toBox?(k==='UG'?-1:z):top;
+      const path=[[...p[0],zA],[...p[0],z],...p.slice(1,-1).map(q=>[...q,z]),[...p.at(-1),z],[...p.at(-1),zB]];
+      const run={path:simplify(path),unit:h.to,label:`${label(fromBox?h.boxes[i-1]:h.from)} → ${label(toBox?h.boxes[i]:h.to)}`,
+        group:'chain '+h.chain,issues:[],warnings:[],pullBoxes:[],risers:[],
+        notes:[`${g.totalDeg}° in this pull (${g.endDeg}° at the ends + ${g.horizontalDeg}° of turns)`],
+        chainHop:h,leg:i,turns:g.turns,degrees:g.totalDeg};
+      run.dataPath=run.path.map(q=>[q[0],q[1],q[2]+(k==='UG'?-.16:.16)]);
+      run.powerLength=pathLength(run.path);run.dataLength=pathLength(run.dataPath);
+      run.bends=g.turns;run.dataBends=g.turns;run.bendDegrees=g.totalDeg;run.maxPullDegrees=g.totalDeg;
+      m.runs.push(run);
+    });
+  }
+  m.pullBoxes=r.pullBoxes.map(b=>({id:b.id,point:[...b.point,k==='UG'?-1:z],units:[label(b.between[0])+' → '+label(b.between[1])],kind:b.kind}));
+  m.messages=[...r.messages];m.warnings=[...r.warnings];
+  if(k==='LR'&&r.walk)for(const t of r.walk.list)m.messages.push('Step-over: '+t);
+  m.powerLength=m.runs.reduce((s,q)=>s+q.powerLength,0);m.dataLength=m.runs.reduce((s,q)=>s+q.dataLength,0);m.cableLength=m.powerLength;
+  m.powerBends=m.runs.reduce((s,q)=>s+q.bends,0);m.dataBends=m.powerBends;m.totalBends=2*m.powerBends;m.maxBends=Math.max(0,...m.runs.map(q=>q.bends));
+  v3Bundles(m);
+  if(k==='UG'&&typeof ugMeasure==='function'){try{ugMeasure(l,m);}catch(e){console.error(e);}}
+  return m;
+}
+function chainInstall(){
+  if(chainInstall.done||!window.BESSCHAIN)return;chainInstall.done=true;
+  if(typeof state.chainMax==='undefined')state.chainMax=0;
+  try{const q=JSON.parse(decodeURIComponent(location.hash.slice(1)))||{};if(q.chainMax!==undefined)state.chainMax=+q.chainMax||0;}catch(_){}
+  // Default gate near the BCP rack (Reeves 11/19/26: gate near the MDP; the rack faces the service).
+  const build=BESS.build;
+  BESS.build=function(code){
+    const l=build.apply(this,arguments);
+    try{if(l&&l.units&&!GATE_OVERRIDES[code]){const g=BESSCHAIN.recommendGate(l);if(g){
+      // pin the gate to its exact fence edge (L-shaped yards have two edges facing the same way)
+      const es=polygonEdges(l.fence);
+      const i=es.findIndex(e=>{const ax=Math.abs(e.t[0])>.5?0:1,s=chainSide(e),lo=Math.min(e.a[ax],e.a[ax]+e.t[ax]*e.len),hi=Math.max(e.a[ax],e.a[ax]+e.t[ax]*e.len);
+        return s===g.side&&e.len>=12-1e-6&&g.from>=lo-1e-3&&g.from+12<=hi+1e-3&&(g.at===undefined||Math.abs(e.a[1-ax]-g.at)<1e-3);});
+      if(i>=0){const e=es[i],ax=Math.abs(e.t[0])>.5?0:1;g.edge=i;g.offset=Math.max(0,Math.min(e.len-12,e.t[ax]>0?g.from-e.a[ax]:e.a[ax]-g.from-12));}
+      l.catalogGate=l.gate;l.gate=g;}}}catch(e){console.error(e);}
+    return l;
+  };
+  const reg=crRegister;
+  crRegister=function(){
+    reg();
+    Object.assign(names,{UG:'Underground daisy chain',LR:'At-grade rack daisy chain',MS:'Middle spine (old home-run trunk)'});
+    Object.assign(descriptions,{
+      UG:'Battery to battery underground. Each hop: elbow out of the battery 90, flex, sweep down 90, straight run, sweep up 90, elbow in 90 = 360, so battery hops are dead straight. The BCP lead may turn once. Pull boxes only where no straight hop exists.',
+      LR:'Battery to battery on a freestanding strut rack at grade (not on the fence; the fence goes up last). Elbow out 90, flex down onto the rack, so each hop may turn twice. Kept out of other units’ 42 in zones and the gate; step-overs listed.',
+      MS:'Old method: home run from the BCP to every unit along a 3 ft spine. Kept for comparison.'});
+    const s=$('method');if(!s)return;
+    for(const [v,t] of [['UG','UG · Underground daisy chain'],['LR','LR · At-grade rack daisy chain'],['MS','MS · Old trunk (home runs)']]){
+      const o=s.querySelector(`option[value="${v}"]`);if(o&&o.textContent!==t)o.textContent=t;}
+  };
+  // Ranking: use the stored catalog metrics; routing every match on each load took 20+ s with 342 layouts.
+  rpRoutingMetrics=function(code){
+    if(!chainInstall.metrics){
+      chainInstall.metrics=new Map(rpRoutingReviewMarkdown().split('\n').slice(2).map(line=>{
+        const a=line.split('|').slice(1,-1).map(s=>s.trim());
+        return [a[0],{code:a[0],paired:+a[1],ventPairs:+a[2],aisles:+a[3],longest:+a[4],conduit:+a[5],bends:+a[6],disposition:a[7]}];
+      }));
+    }
+    return chainInstall.metrics.get(code)||null;
+  };
+  const route=v3Route;
+  v3Route=function(l,k){return k==='UG'||k==='LR'?chainMethod(l,k):route(l,k);};
+  const check=checkMethod;
+  checkMethod=function(l,m,k){if(m&&m.isChain)return m;return check(l,m,k);};
+  const wa=walkApply;
+  walkApply=function(l,m,method,gate){if(m&&m.isChain)return m;return wa(l,m,method,gate);};
+  buildMethods=function(l){
+    crRegister();for(const u of l.units)u.stub=v3Stub(u);
+    const out={None:crEmpty()};
+    out.UG=chainMethod(l,'UG');
+    let lr=null;
+    Object.defineProperty(out,'LR',{enumerable:true,configurable:true,get(){if(!lr)lr=chainMethod(l,'LR');return lr;},set(v){lr=v;}});
+    out.MS=v3ApplyOverrides(l,route(l,'MS'),'MS');check(l,out.MS,'MS');v3Gate(l,out.MS,null);
+    return out;
+  };
+  const planX=v3PlanExtras;
+  v3PlanExtras=function(){
+    const m=routes[state.method];
+    if(!m||!m.isChain)return planX();
+    if(state.method==='UG'&&typeof ugPlan==='function')ugPlan(); else planX();
+    chainPlan(m);
+  };
+  const panel=updatePanel;
+  updatePanel=function(...a){const out=panel(...a);try{chainPanel();}catch(e){console.error(e);}return out;};
+  if(!$('chainControls')&&$('methodNote')){
+    const d=document.createElement('div');d.id='chainControls';
+    d.innerHTML='<label for="chainMax">Batteries per chain</label><select id="chainMax"><option value="0">Auto (wire upsizing priced in)</option>'+
+      [1,2,3,4,5,6].map(n=>`<option value="${n}">Up to ${n}</option>`).join('')+'</select>'+
+      '<div class="row" id="chainLRButtons"><button type="button" id="chainBestGate">Best gate for at-grade</button><button type="button" id="chainWiden">Try a wider fence</button></div><p class="note" id="chainWidenNote"></p>';
+    $('methodNote').before(d);
+    $('chainMax').value=String(state.chainMax||0);
+    $('chainMax').onchange=e=>{state.chainMax=+e.target.value;routeCache.clear();try{flipInit.data?.metrics.clear();}catch(_){}loadLayout();render();save();};
+    $('chainBestGate').onclick=()=>{
+      const r=BESSCHAIN.route(layout,'LR',Object.assign(chainOptions(),{gateTries:5})),g=chainGateToState(r.gate);
+      if(g){state.gate=g;routes.LR=chainMethod(layout,'LR');render();save();}
+    };
+    $('chainWiden').onclick=()=>{
+      $('chainWidenNote').textContent='Checking 12 fence options…';
+      setTimeout(()=>{
+        const base=BESSCHAIN.route(layout,'LR',Object.assign(chainOptions(),{gate:chainPageGate()})),w=BESSCHAIN.widen(layout,chainOptions(),base);
+        $('chainWidenNote').textContent=w?`Widening the ${({N:'north',S:'south',E:'east',W:'west'})[w.side]} side by ${w.feet} ft: step-overs ${base.walk.list.length} → ${w.result.walk.list.length}, pull boxes ${base.boxes} → ${w.boxes}.`:'No fence widening up to 3 ft improves the at-grade routing here.';
+      },30);
+    };
+  }
+}
+function chainPlan(m){
+  const svg=$('plan');if(!svg||!m.chain)return;
+  svg.querySelectorAll('[data-chain]').forEach(e=>e.remove());
+  const parts=[],r=m.chain,col=['#c2410c','#7c3aed','#0f766e','#b91c1c','#1d4ed8','#a16207'];
+  for(const h of r.hops)h.legs.forEach((g,i)=>{
+    const p=g.path,mid=p.length>2?p[Math.floor(p.length/2)]:[(p[0][0]+p[1][0])/2,(p[0][1]+p[1][1])/2],q=bessPlanPoint(mid);
+    const c=col[(h.chain-1)%col.length],t=`${g.totalDeg}°`,bad=g.totalDeg>360;
+    const tip=`Chain ${h.chain}: ${h.from?'BESS-'+h.from:'BCP'} → BESS-${h.to}${h.legs.length>1?' (leg '+(i+1)+')':''}; ${t} in this pull; ${fmt(g.length,1)} ft; ${h.conduit} in power conduit; ${h.circuits} circuit(s)`;
+    parts.push(`<g><title>${esc(tip)}</title><rect x="${q[0]-.95}" y="${q[1]-.42}" width="1.9" height=".84" rx=".2" fill="#fff" stroke="${bad?RED:c}" stroke-width=".07"/>`+
+      `<text x="${q[0]}" y="${q[1]+.22}" font-size=".6" text-anchor="middle" fill="${bad?RED:c}" font-weight="700">${t}</text></g>`);
+    for(const e of [p[0],p.at(-1)]){const s=bessPlanPoint(e);parts.push(`<circle cx="${s[0]}" cy="${s[1]}" r=".22" fill="${c}" stroke="#fff" stroke-width=".06"/>`);}
+  });
+  for(const b of r.pullBoxes){const s=bessPlanPoint(b.point);
+    parts.push(`<g><title>${esc(b.id+': '+b.kind)}</title><rect x="${s[0]-.45}" y="${s[1]-.45}" width=".9" height=".9" fill="#ffd400" stroke="#3b3000" stroke-width=".08"/><text x="${s[0]}" y="${s[1]-.6}" font-size=".6" text-anchor="middle" font-weight="700">${b.id}</text></g>`);}
+  const g=document.createElementNS('http://www.w3.org/2000/svg','g');g.setAttribute('data-chain','');g.innerHTML=parts.join('');svg.appendChild(g);
+}
+function chainPanel(){
+  // at grade the route depends on the gate: re-route when the gate has been moved
+  if(state.method==='LR'&&layout&&routes.LR&&routes.LR.isChain&&routes.LR.gateKey!==JSON.stringify(state.gate))routes.LR=chainMethod(layout,'LR');
+  const m=routes[state.method],ctl=$('chainControls'),isChain=!!(m&&m.isChain);
+  if(ctl){ctl.hidden=!(state.method==='UG'||state.method==='LR');const b=$('chainLRButtons');if(b)b.hidden=state.method!=='LR';}
+  for(const id of ['routeEditorControls','routeEditorPencil'])if($(id))$(id).hidden=isChain;
+  if(!isChain||!m.chain)return;
+  const r=m.chain,n=layout.units.length;
+  const extra=[['Chains',r.chains.map(c=>'['+c.units.join(' › ')+']').join(' ')],['Junction / pull boxes',String(r.pullBoxes.length)],['Most degrees in one pull',`${r.maxDeg}° of 360°`]];
+  if(state.method==='LR'&&r.walk)extra.push(['Step-overs at grade',String(r.walk.list.length)]);
+  for(const c of r.chains)extra.push([`Chain ${c.id} wire`,`${c.units.length} circuit${c.units.length>1?'s':''} · about ${c.wire.size} Cu`]);
+  $('summary').insertAdjacentHTML('beforeend',extra.map(([a,b])=>`<div>${esc(a)}<strong>${esc(b)}</strong></div>`).join(''));
+  const lab=id=>id?'BESS-'+id:'BCP';
+  const rows=r.hops.flatMap(h=>h.legs.map((g,i)=>`<tr><td>${h.chain}</td><td>${i?h.boxes[i-1]:lab(h.from)} → ${i<h.legs.length-1?h.boxes[i]:lab(h.to)}</td><td>${fmt(g.length,1)}</td><td>${g.endDeg}+${g.horizontalDeg}</td><td${g.totalDeg>360?' class="bad"':''}><strong>${g.totalDeg}°</strong></td><td>${h.circuits}</td><td>${h.conduit}"</td></tr>`)).join('');
+  const list=a=>'<ul>'+a.map(t=>'<li>'+esc(t)+'</li>').join('')+'</ul>';
+  // at grade: offer a gate that routes better (computed once per layout, only when LR is shown)
+  let better='';
+  if(state.method==='LR'&&r.walk){
+    if(m.betterGate===undefined){
+      m.betterGate=null;
+      try{const b=BESSCHAIN.route(layout,'LR',Object.assign(chainOptions(),{gateTries:5})),cur=r.walk.list.length*600+r.pullBoxes.length*1000,alt=b.walk.list.length*600+b.pullBoxes.length*1000;
+        if(b.gate&&alt<cur-1)m.betterGate={gate:b.gate,steps:b.walk.list.length,boxes:b.pullBoxes.length};}catch(e){console.error(e);}
+    }
+    if(m.betterGate)better=`<p class="note"><strong>Better gate for at-grade:</strong> ${({N:'north',S:'south',E:'east',W:'west'})[m.betterGate.gate.side]} fence at ${fmt(m.betterGate.gate.from,1)} ft gives ${m.betterGate.steps} step-over${m.betterGate.steps===1?'':'s'} and ${m.betterGate.boxes} pull box${m.betterGate.boxes===1?'':'es'}. <button type="button" id="chainUseGate">Use it</button></p>`;
+  }
+  $('checks').classList.toggle('bad',m.messages.length>0);
+  $('checks').innerHTML=`<strong>${n}/${n} units chained · ${r.pullBoxes.length} pull box${r.pullBoxes.length===1?'':'es'} · ${m.messages.length} conflict${m.messages.length===1?'':'s'}</strong>`+
+    better+(m.messages.length?list(m.messages):'')+(m.warnings.length?'<div class="note">'+list(m.warnings)+'</div>':'')+
+    '<table class="chain-table"><thead><tr><th>Chain</th><th>Pull</th><th>Ft</th><th>Ends+turns</th><th>Total</th><th>Circuits</th><th>PVC</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+    '<p class="note">Each battery is a pull point. Planning numbers only: the engineer of record sizes wire, conduit and pull boxes. Viridi terminals take #8 to #2, so a chain stops at 6 batteries. Confirm with Viridi that other units’ conductors may pass through the cabinet wiring space. 2026 NEC 300.24 counts flex bends toward the 360, so keep each flex drop straight.</p>';
+  if($('chainUseGate'))$('chainUseGate').onclick=()=>{const g=chainGateToState(m.betterGate.gate);if(g){state.gate=g;routes.LR=chainMethod(layout,'LR');render();save();}};
+}
+
 /* ==== v3 startup ==== */
-for (const f of [()=>crRegister(), ()=>rpInstallRankingControls(), ()=>designInit(), ()=>editorInit(), ()=>walkInit(), ()=>flipInit(), ()=>{if(typeof ugInit==='function')ugInit();}]){try{f();}catch(e){console.error('startup',e);}}
+for (const f of [()=>crRegister(), ()=>rpInstallRankingControls(), ()=>designInit(), ()=>editorInit(), ()=>walkInit(), ()=>flipInit(), ()=>{if(typeof ugInit==='function')ugInit();}, ()=>chainInstall()]){try{f();}catch(e){console.error('startup',e);}}
 try{refreshSelection(true);render(true);}catch(e){console.error('rerender',e);}
 })();
 </script>
